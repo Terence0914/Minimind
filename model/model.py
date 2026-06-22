@@ -1,6 +1,5 @@
 from transformers import PretrainedConfig
 
-
 class MokioMindConfig(PretrainedConfig):
     model_type = "mokiomind"
 
