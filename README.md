@@ -1,24 +1,33 @@
 # Minimind 全流程解析
 
-## layerNorm vs RMSNorm
+## LayerNorm vs RMSNorm
+
 ---
+
 | 对比维度 | LayerNorm (经典方案) | RMSNorm (现代大模型标配) |
 | :--- | :--- | :--- |
 | **核心思想** | 平移 + 缩放 (Mean-centering & Scaling) | **仅缩放** (Scaling only) |
 | **数学公式** | $y = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta$ | $RMS(x) = \sqrt{\frac{1}{n} \sum_{i=1}^{n} x_i^2}$<br><br>$y = \frac{x}{RMS(x) + \epsilon} \cdot \gamma$ |
 | **操作步骤** | 算均值 $\rightarrow$ 减均值 $\rightarrow$ 算方差 $\rightarrow$ 缩放 | 算平方和平均 $\rightarrow$ 开根号 $\rightarrow$ 缩放 |
-| **偏置项 ($\beta$)** | 通常有 (整体平移特征) | **无** (保持原点不动) |
-| **计算速度** | 相对较慢 (需多次内存读写和同步) | **快 10% ~ 40%** (省去了计算和减去均值的步骤) |
+| **偏置项 ($\beta$)**| 通常有 (整体平移特征) | **无** (保持原点不动) |
+| **计算速度** | 相对较慢 (需多次内存读写和同步) | **快 10% ~ 40%** (省去计算和减去均值的步骤) |
 | **显存消耗** | 较高 (反向传播时需保存均值 $\mu$ 等中间态) | **极低** (只需保存 RMS 标量) |
-| **最终准确率** | 行业基准线 | **几乎与 LayerNorm 完全一致** |
+| **最终准确率**| 行业基准线 | **几乎与 LayerNorm 完全一致** |
 | **代表模型** | BERT, GPT-2, 传统的 Vision Transformer (ViT) | **LLaMA, Qwen, Mistral** |
 
-# RoPE & YaRN
+<br>
+
+## RoPE & YaRN
+
 ---
+
 ### 1. RoPE (旋转位置编码)：表盘上的时针
 
 回想一下在构建类似 nanoGPT 这样的基础架构时，我们通常会怎么处理位置信息？标准的做法是生成一个“绝对位置向量”，然后直接跟词向量**加**在一起。这就好比给每个词强行贴上了一个带有页码的标签：
-$$x_m' = x_m + p_m$$
+
+$$
+x_m' = x_m + p_m
+$$
 
 但这种做法有一个致命弱点：Transformer 的核心是 Attention（注意力机制），它通过计算两个词向量的内积来决定它们的相关性。Attention 其实更想知道的是**“这两个词隔了多远”**（相对位置），而不是**“这两个词分别在第几个位置”**（绝对位置）。
 
@@ -26,10 +35,18 @@ RoPE 的天才之处在于，它彻底抛弃了“加法”，改用了“旋转
 
 * **直观理解：** 想象把词向量里的特征两两分组，每组特征就像是在二维平面（表盘）上的一个指针。
 * **位置决定角度：** 词在句子里的位置越靠后，这个指针被旋转的角度就越大。第一个词转 10 度，第二个转 20 度，第三个转 30 度。数学上，给定位置 $m$ 的 Query 向量 $q_m$，其在二维平面上的复数表示旋转为：
-  $$f_q(q_m, m) = q_m e^{im\theta}$$
-  其中 $\theta$ 是由该维度的索引决定的基频（通常 $\theta_i = 10000^{-2i/d}$，$d$ 为特征维度）。
+
+$$
+f_q(q_m, m) = q_m e^{im\theta}
+$$
+
+> **注：** 其中 $\theta$ 是由该维度的索引决定的基频（通常 $\theta_i = 10000^{-\frac{2i}{d}}$，$d$ 为特征维度）。
+
 * **内积的魔法：** 从向量空间的角度来看，当你计算两个二维向量的内积时，结果只取决于它们之间的**夹角**。比如位置 1（10度）和位置 3（30度）的词，它们的相对夹角是 20 度；位置 5（50度）和位置 7（70度）的词，相对夹角也是 20 度。在公式中表现为：
-  $$\langle f_q(q_m, m), f_k(k_n, n) \rangle = \text{Re}\left( q_m e^{im\theta} (k_n e^{in\theta})^* \right) = \text{Re}\left( q_m k_n^* e^{i(m-n)\theta} \right)$$
+
+$$
+\langle f_q(q_m, m), f_k(k_n, n) \rangle = \text{Re}\left( q_m e^{im\theta} (k_n e^{in\theta})^* \right) = \text{Re}\left( q_m k_n^* e^{i(m-n)\theta} \right)
+$$
 
 **结论：** 模型只需要计算常规的 Attention 内积，就自动获取了词与词之间的相对距离 $(m-n)$。这就是为什么现在的大模型（如 LLaMA、Qwen）底层几乎全部采用了 RoPE，它极其优雅地解决了相对位置编码的问题，且不额外占用庞大的显存去存一个距离矩阵。
 
@@ -37,9 +54,9 @@ RoPE 的天才之处在于，它彻底抛弃了“加法”，改用了“旋转
 
 ### 2. YaRN (上下文扩展)：拉伸不同弹性的皮筋
 
-现在，假设你的模型出厂设定只能看 4000 字（4K 上下文）。你想让它能看 32000 字（32K 上下文），怎么办？此时引入扩展倍数 $s = \frac{32000}{4000} = 8$。
+现在，假设你的模型出厂设定只能看 4,000 字（4K 上下文）。你想让它能看 32,000 字（32K 上下文），怎么办？此时引入扩展倍数 $s = \frac{32000}{4000} = 8$。
 
-最粗暴的做法是“线性插值”（Position Interpolation）：把 32000 个字硬生生挤进 4000 个位置里，即直接将位置索引缩小 $s$ 倍（$m \rightarrow \frac{m}{s}$）。这就好比把标尺刻度缩小了 8 倍。但问题是，RoPE 里的那些“指针”转动的速度是不一样的，对应着不同的波长 $\lambda_i = \frac{2\pi}{\theta_i}$。
+最粗暴的做法是“线性插值”（Position Interpolation）：把 32,000 个字硬生生挤进 4,000 个位置里，即直接将位置索引缩小 $s$ 倍（$m \rightarrow \frac{m}{s}$）。这就好比把标尺刻度缩小了 8 倍。但问题是，RoPE 里的那些“指针”转动的速度是不一样的，对应着不同的波长 $\lambda_i = \frac{2\pi}{\theta_i}$。
 
 在 RoPE 中：
 * **高频特征（转得快的指针，波长短）：** 负责捕捉近距离的局部语法细节（比如“我”和“吃”的关系）。
@@ -48,22 +65,39 @@ RoPE 的天才之处在于，它彻底抛弃了“加法”，改用了“旋转
 如果直接把标尺整体压缩，那些负责局部语法的高频指针就会完全乱套，模型连基本的话都说不通了。YaRN 就是为了精细化解决这个问题而诞生的。它像是在处理一根不同部分弹性不同的皮筋：
 
 * **高频部分（不拉伸）：** 对于那些转得快的指针（波长较短，$\lambda_i < \text{原始上下文长度}$），YaRN 选择完全保留它们原本的角度计算方式。因为局部语法关系（隔了 1 个词还是 2 个词）是绝对的，不能被压缩。即基频 $\theta_i$ 保持不变。
-* **低频部分（尽情拉伸）：** 对于那些转得极慢的指针（波长极长，$\lambda_i \gg \text{原始上下文长度}$），YaRN 对它们进行等比例的压缩插值。即将基频修改为 $\theta_i' = \frac{\theta_i}{s}$。让模型即使读到第 30000 个字，低频指针转到的位置也和以前读第 3000 个字时差不多，从而稳住宏观语义的理解。
-* **降温处理（Temperature Scaling）：** 当模型突然要面对 32000 个词计算 Attention 时，注意力极其容易分散（随着序列变长，Softmax 的熵会增加）。YaRN 在 Softmax 之前乘上一个缩放系数 $t$（基于 $s$ 计算得出，通常 $t > 1$），强行让模型的注意力重新“聚焦”到关键信息上：
-  $$\text{Softmax}\left(\frac{t \cdot Q K^T}{\sqrt{d}}\right)$$
+* **低频部分（尽情拉伸）：** 对于那些转得极慢的指针（波长极长，$\lambda_i \gg \text{原始上下文长度}$），YaRN 对它们进行等比例的压缩插值。即将基频修改为：
+
+$$
+\theta_i' = \frac{\theta_i}{s}
+$$
+
+> 这样可以让模型即使读到第 30,000 个字，低频指针转到的位置也和以前读第 3,000 个字时差不多，从而稳住宏观语义的理解。
+
+* **降温处理（Temperature Scaling）：** 当模型突然要面对 32,000 个词计算 Attention 时，注意力极其容易分散（随着序列变长，Softmax 的熵会增加）。YaRN 在 Softmax 之前乘上一个缩放系数 $t$（基于 $s$ 计算得出，通常 $t > 1$），强行让模型的注意力重新“聚焦”到关键信息上：
+
+$$
+\text{Softmax}\left(\frac{t \cdot Q K^T}{\sqrt{d}}\right)
+$$
 
 **结论：** YaRN 就像是一个无损放大器。它通过区分频率的精细化操作，让你几乎不需要花多少算力重新训练，就能把现有模型的上下文处理能力拉长几倍甚至几十倍。
 
----
+<br>
+
 ## 公式的具体执行
+
+---
+
 ### 1. 基础旋转频率公式 (Base Rotation Frequency)
 
 计算基础旋转频率 $\theta_i$ 的原公式为：
-$$\theta_i = \text{base}^{-\frac{2i}{d}}$$
+
+$$
+\theta_i = \text{base}^{-\frac{2i}{d}}
+$$
 
 > **参数说明：**
-> * $\text{base}$ 是底数（如代码中的 `rope_base`，通常是 10000）。
-> * $d$ 是每个注意力头特征维度大小（对应代码中的 `dim`）。
+> * $\text{base}$ 是底数（如源码中的 `rope_base`，通常是 10000）。
+> * $d$ 是每个注意力头特征维度大小（对应源码中的 `dim`）。
 > * $2i$ 是维度的偶数索引（$0, 2, 4, 6...$）。
 
 ---
@@ -75,39 +109,60 @@ $$\theta_i = \text{base}^{-\frac{2i}{d}}$$
 #### 第一步：引入“波长”的物理直觉
 在 RoPE 中，每个维度的旋转速度不同。我们定义**波长 $\lambda$**（Wavelength）为：**需要多少个词（Token）的距离，这个维度刚好能旋转完整的一圈（$2\pi$）**。
 根据公式 $\text{波长} = \frac{2\pi}{\text{旋转频率}}$，我们可以得出第 $i$ 个维度的波长公式：
-$$\lambda_i = \frac{2\pi}{\theta_i} = 2\pi \cdot \text{base}^{\frac{2i}{d}}$$
+
+$$
+\lambda_i = \frac{2\pi}{\theta_i} = 2\pi \cdot \text{base}^{\frac{2i}{d}}
+$$
+
 *(可以看出：维度索引 $i$ 越大，波长 $\lambda$ 越长，代表它处理的是距离越远的低频信息。)*
 
-#### 第二步：设定相对阈值（为什么是 $\lambda = \text{orig\_max} / b$ ？）
-YaRN 算法认为，不应该用绝对的距离来划分高低频，而应该看**波长占整个上下文窗口的比例**。
-于是引入了一个比例常数 $b$（代码中的 `beta_fast` 或 `beta_slow`）。
+#### 第二步：设定相对阈值
+为了公式的学术规范性，我们用 $L_{\text{orig}}$ 来代表模型预训练时的最大上下文长度。
+YaRN 算法认为，不应该用绝对的距离来划分高低频，而应该看**波长占整个上下文窗口的比例**。于是引入了一个比例常数 $b$（对应源码中的 `beta_fast` 或 `beta_slow`）。
 
-算法规定，如果某个维度的波长 $\lambda_i$，刚好等于预训练最大长度（$\text{orig\_max}$）的 $\frac{1}{b}$，那这个维度就是一个**临界点**。
-所以我们列出等式：
-$$\lambda_i = \frac{\text{orig\_max}}{b}$$
+算法规定，如果某个维度的波长 $\lambda_i$，刚好等于预训练最大长度 $L_{\text{orig}}$ 的 $\frac{1}{b}$，那这个维度就是一个**临界点**。所以我们列出等式：
+
+$$
+\lambda_i = \frac{L_{\text{orig}}}{b}
+$$
 
 > **举个直观的例子：**
-> 假设模型原本最多看 2048 个词（$\text{orig\_max} = 2048$），定义高频的系数 $b = 32$ (`beta_fast`)。
-> 那么临界波长就是 $2048 / 32 = 64$。
+> 假设模型原本最多看 2048 个词（$L_{\text{orig}} = 2048$），定义高频的系数 $b = 32$。那么临界波长就是 $2048 / 32 = 64$。
 > 这意味着：**任何波长小于 64 个词的维度，都被认为是极其局部的“高频细节”，我们在拉伸文本时绝对不能修改它们！**
 
 #### 第三步：代入公式求解 $i$
 现在我们有了目标波长的等式，需要反推出这对应的是第几个维度（求 $i$）：
-$$2\pi \cdot \text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b}$$
+
+$$
+2\pi \cdot \text{base}^{\frac{2i}{d}} = \frac{L_{\text{orig}}}{b}
+$$
 
 1. 将 $2\pi$ 移到等号右边：
-$$\text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b \cdot 2\pi}$$
+
+$$
+\text{base}^{\frac{2i}{d}} = \frac{L_{\text{orig}}}{b \cdot 2\pi}
+$$
 
 2. 等式两边同时取自然对数（$\ln$）：
-$$\ln\left(\text{base}^{\frac{2i}{d}}\right) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)$$
+
+$$
+\ln\left(\text{base}^{\frac{2i}{d}}\right) = \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)
+$$
 
 3. 根据对数运算法则，把指数提出来：
-$$\frac{2i}{d} \cdot \ln(\text{base}) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)$$
 
-4. 最后，把等式左边除了 $i$ 以外的东西全移到右边，大功告成：
-$$i = \frac{d \cdot \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)}{2 \cdot \ln(\text{base})}$$
+$$
+\frac{2i}{d} \cdot \ln(\text{base}) = \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)
+$$
 
-> **代码对应：** > 这个完美推导出来的结果，就是源码中那段长长的 lambda 函数：
+4. 最后，把等式左边除了 $i$ 以外的变量全移到右边，大功告成：
+
+$$
+i = \frac{d \cdot \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)}{2 \cdot \ln(\text{base})}
+$$
+
+> **代码对应：**
+> 这里的 $L_{\text{orig}}$ 对应源码中的 `orig_max`。推导出来的最终结果，就是源码中用于反推维度的 `lambda` 函数：
 > `inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))`
 
 ---
@@ -126,15 +181,25 @@ $$i = \frac{d \cdot \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)}{2 \cd
    * $\cos$：`[c_1, c_2, c_1, c_2]`
    * $\sin$：`[s_1, s_2, s_1, s_2]`
 
-按照代码执行张量相加：`q_embed = (q * cos) + (rotate_half(q) * sin)` （k同理）
+按照代码执行张量相加：`q_embed = (q * cos) + (rotate_half(q) * sin)` （$k$ 向量同理）：
 
 * **前半部分维度（原来是 A 和 B，等效于 $x$ 坐标）：**
-  $$\text{新A} = A \cdot c_1 + (-C \cdot s_1) = A \cdot c_1 - C \cdot s_1$$
-  $$\text{新B} = B \cdot c_2 + (-D \cdot s_2) = B \cdot c_2 - D \cdot s_2$$
+
+$$
+\text{新A} = A \cdot c_1 + (-C \cdot s_1) = A \cdot c_1 - C \cdot s_1
+$$
+$$
+\text{新B} = B \cdot c_2 + (-D \cdot s_2) = B \cdot c_2 - D \cdot s_2
+$$
 
 * **后半部分维度（原来是 C 和 D，等效于 $y$ 坐标）：**
-  $$\text{新C} = C \cdot c_1 + A \cdot s_1 = A \cdot s_1 + C \cdot c_1$$
-  $$\text{新D} = D \cdot c_2 + B \cdot s_2 = B \cdot s_2 + D \cdot c_2$$
+
+$$
+\text{新C} = C \cdot c_1 + A \cdot s_1 = A \cdot s_1 + C \cdot c_1
+$$
+$$
+\text{新D} = D \cdot c_2 + B \cdot s_2 = B \cdot s_2 + D \cdot c_2
+$$
 
 > **结论与精妙之处：**
 > A 和 C 恰好完美形成了一对 $(x, y)$ 的旋转公式，B 和 D 形成了另一对。这段代码通过这种“左右互换”的张量拼接，避免了极其消耗内存的巨大旋转矩阵乘法，仅用简单的逐元素加法和乘法就完成了批量维度的成对旋转！
