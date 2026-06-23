@@ -54,7 +54,7 @@ $$
 
 ### 2. YaRN (上下文扩展)：拉伸不同弹性的皮筋
 
-现在，假设你的模型出厂设定只能看 4,000 字（4K 上下文）。你想让它能看 32,000 字（32K 上下文），怎么办？此时引入扩展倍数 $s = \frac{32000}{4000} = 8$。
+现在，假设你的模型出厂设定只能看 4,000 字（即预训练最大长度 $\text{orig\_max} = 4000$）。你想让它能看 32,000 字（32K 上下文），怎么办？此时引入扩展倍数 $s = \frac{32000}{4000} = 8$。
 
 最粗暴的做法是“线性插值”（Position Interpolation）：把 32,000 个字硬生生挤进 4,000 个位置里，即直接将位置索引缩小 $s$ 倍（$m \rightarrow \frac{m}{s}$）。这就好比把标尺刻度缩小了 8 倍。但问题是，RoPE 里的那些“指针”转动的速度是不一样的，对应着不同的波长 $\lambda_i = \frac{2\pi}{\theta_i}$。
 
@@ -64,8 +64,8 @@ $$
 
 如果直接把标尺整体压缩，那些负责局部语法的高频指针就会完全乱套，模型连基本的话都说不通了。YaRN 就是为了精细化解决这个问题而诞生的。它像是在处理一根不同部分弹性不同的皮筋：
 
-* **高频部分（不拉伸）：** 对于那些转得快的指针（波长较短，$\lambda_i < \text{原始上下文长度}$），YaRN 选择完全保留它们原本的角度计算方式。因为局部语法关系（隔了 1 个词还是 2 个词）是绝对的，不能被压缩。即基频 $\theta_i$ 保持不变。
-* **低频部分（尽情拉伸）：** 对于那些转得极慢的指针（波长极长，$\lambda_i \gg \text{原始上下文长度}$），YaRN 对它们进行等比例的压缩插值。即将基频修改为：
+* **高频部分（不拉伸）：** 对于那些转得快的指针（波长较短，即 $\lambda_i < \text{orig\_max}$），YaRN 选择完全保留它们原本的角度计算方式。因为局部语法关系（隔了 1 个词还是 2 个词）是绝对的，不能被压缩。即基频 $\theta_i$ 保持不变。
+* **低频部分（尽情拉伸）：** 对于那些转得极慢的指针（波长极长，即 $\lambda_i \gg \text{orig\_max}$），YaRN 对它们进行等比例的压缩插值。即将基频修改为：
 
 $$
 \theta_i' = \frac{\theta_i}{s}
@@ -117,52 +117,51 @@ $$
 *(可以看出：维度索引 $i$ 越大，波长 $\lambda$ 越长，代表它处理的是距离越远的低频信息。)*
 
 #### 第二步：设定相对阈值
-为了公式的学术规范性，我们用 $L_{\text{orig}}$ 来代表模型预训练时的最大上下文长度。
 YaRN 算法认为，不应该用绝对的距离来划分高低频，而应该看**波长占整个上下文窗口的比例**。于是引入了一个比例常数 $b$（对应源码中的 `beta_fast` 或 `beta_slow`）。
 
-算法规定，如果某个维度的波长 $\lambda_i$，刚好等于预训练最大长度 $L_{\text{orig}}$ 的 $\frac{1}{b}$，那这个维度就是一个**临界点**。所以我们列出等式：
+算法规定，如果某个维度的波长 $\lambda_i$，刚好等于预训练最大长度 $\text{orig\_max}$ 的 $\frac{1}{b}$，那这个维度就是一个**临界点**。所以我们列出等式：
 
 $$
-\lambda_i = \frac{L_{\text{orig}}}{b}
+\lambda_i = \frac{\text{orig\_max}}{b}
 $$
 
 > **举个直观的例子：**
-> 假设模型原本最多看 2048 个词（$L_{\text{orig}} = 2048$），定义高频的系数 $b = 32$。那么临界波长就是 $2048 / 32 = 64$。
+> 假设模型原本最多看 2048 个词（$\text{orig\_max} = 2048$），定义高频的系数 $b = 32$。那么临界波长就是 $2048 / 32 = 64$。
 > 这意味着：**任何波长小于 64 个词的维度，都被认为是极其局部的“高频细节”，我们在拉伸文本时绝对不能修改它们！**
 
 #### 第三步：代入公式求解 $i$
 现在我们有了目标波长的等式，需要反推出这对应的是第几个维度（求 $i$）：
 
 $$
-2\pi \cdot \text{base}^{\frac{2i}{d}} = \frac{L_{\text{orig}}}{b}
+2\pi \cdot \text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b}
 $$
 
 1. 将 $2\pi$ 移到等号右边：
 
 $$
-\text{base}^{\frac{2i}{d}} = \frac{L_{\text{orig}}}{b \cdot 2\pi}
+\text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b \cdot 2\pi}
 $$
 
 2. 等式两边同时取自然对数（$\ln$）：
 
 $$
-\ln\left(\text{base}^{\frac{2i}{d}}\right) = \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)
+\ln\left(\text{base}^{\frac{2i}{d}}\right) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)
 $$
 
 3. 根据对数运算法则，把指数提出来：
 
 $$
-\frac{2i}{d} \cdot \ln(\text{base}) = \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)
+\frac{2i}{d} \cdot \ln(\text{base}) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)
 $$
 
 4. 最后，把等式左边除了 $i$ 以外的变量全移到右边，大功告成：
 
 $$
-i = \frac{d \cdot \ln\left(\frac{L_{\text{orig}}}{b \cdot 2\pi}\right)}{2 \cdot \ln(\text{base})}
+i = \frac{d \cdot \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)}{2 \cdot \ln(\text{base})}
 $$
 
 > **代码对应：**
-> 这里的 $L_{\text{orig}}$ 对应源码中的 `orig_max`。推导出来的最终结果，就是源码中用于反推维度的 `lambda` 函数：
+> 推导出来的最终结果，完美对应源码中用于反推维度的 `lambda` 函数：
 > `inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))`
 
 ---
@@ -170,7 +169,7 @@ $$
 ### 3. 二维平面旋转公式与张量实现 (2D Rotation & `rotate_half` Magic)
 
 #### 标准二维平面旋转公式
-假设一个坐标 $(x, y)$ 要旋转 $\theta$ 角度，新坐标 $(x', y')$ 的公式是：
+假设一个坐标 $(x, y)$ 要旋转 $\theta$ 角度，变换后的新坐标 $(x', y')$ 的公式是：
 * $x' = x \cdot \cos(\theta) - y \cdot \sin(\theta)$
 * $y' = x \cdot \sin(\theta) + y \cdot \cos(\theta)$
 
@@ -183,22 +182,22 @@ $$
 
 按照代码执行张量相加：`q_embed = (q * cos) + (rotate_half(q) * sin)` （$k$ 向量同理）：
 
-* **前半部分维度（原来是 A 和 B，等效于 $x$ 坐标）：**
+* **前半部分维度（原来是 A 和 B，对应 $x$ 坐标计算出的新坐标 $A'$ 和 $B'$）：**
 
 $$
-\text{新A} = A \cdot c_1 + (-C \cdot s_1) = A \cdot c_1 - C \cdot s_1
+A' = A \cdot c_1 + (-C \cdot s_1) = A \cdot c_1 - C \cdot s_1
 $$
 $$
-\text{新B} = B \cdot c_2 + (-D \cdot s_2) = B \cdot c_2 - D \cdot s_2
+B' = B \cdot c_2 + (-D \cdot s_2) = B \cdot c_2 - D \cdot s_2
 $$
 
-* **后半部分维度（原来是 C 和 D，等效于 $y$ 坐标）：**
+* **后半部分维度（原来是 C 和 D，对应 $y$ 坐标计算出的新坐标 $C'$ 和 $D'$）：**
 
 $$
-\text{新C} = C \cdot c_1 + A \cdot s_1 = A \cdot s_1 + C \cdot c_1
+C' = C \cdot c_1 + A \cdot s_1 = A \cdot s_1 + C \cdot c_1
 $$
 $$
-\text{新D} = D \cdot c_2 + B \cdot s_2 = B \cdot s_2 + D \cdot c_2
+D' = D \cdot c_2 + B \cdot s_2 = B \cdot s_2 + D \cdot c_2
 $$
 
 > **结论与精妙之处：**
