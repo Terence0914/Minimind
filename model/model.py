@@ -134,16 +134,26 @@ def precompute_freqs_cis(
             (torch.arange(dim // 2, device = freqs.device).float() - low) / max(high - low, 0.001), 0, 1,
             )
 
-            #对于高频部分（局部细节）： 这里的 ramp 值为 0
+            #对于高频部分（局部细节）： 这里的 ramp 值为 0 原封不动
             #对于低频部分（全局长文）： 这里的 ramp 值为 1
             #对于中频部分（过渡区）： 这里的 ramp 是 0 到 1 之间的小数（比如 0.5）。
             freqs = freqs * (1 - ramp + ramp / factor)
 
         #获取每一个词的位置坐标
         t = torch.arange(end, device = freqs.device)
-        #计算每个词，每个维度的“绝对旋转角度” 角度 = 位置 * 频率
+        #计算每个词，每个维度的“绝对旋转角度” 角度 = 位置 * 频率，注意outer 方法是把第一个数组的每一个元素，拿去跟第二个数组里的所有元素分别相乘
         freqs = torch.outer(t, freqs).float()
+        #在最后一个维度拼接，因为前面把隐藏维度进行了两两分组，为了旋转，后续要给他拼回去
         freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim = -1) * attn_factor
         freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim = -1) * attn_factor
 
         return freqs_cos, freqs_sin
+
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1):
+    def rotate_half(x):
+        return torch.cat(
+            (-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim = -1
+        )
+    q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)) * sin.unsqueeze(unsqueeze_dim)
+    k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)) * sin.unsqueeze(unsqueeze_dim)
+    return q_embed, k_embed
