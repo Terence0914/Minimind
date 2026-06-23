@@ -96,7 +96,7 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         return self.weight * self._norm(x.float()).type_as(x)
 
-#Rope & YaRN    
+#RoPE & YaRN    
 def precompute_freqs_cis(
         #每个注意力头的特征维度
         dim:int, 
@@ -129,6 +129,8 @@ def precompute_freqs_cis(
                 min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1), #ceil向上取整,为了让过渡区宽一点，减 1 是因为代码里的索引是从 0 开始的
             )
 
+            #ramp = i - low / high - low
+            #dim // 2 是因为旋转位置编码（RoPE）是把维度两两分组来做cos, sin
             # torch.clamp(计算结果, 0, 1)，意思是“强制截断”！ 如果算出来的结果小于 0，强制变成 0，如果算出来的结果大于 1，强制变成 1
             ramp = torch.clamp(
             (torch.arange(dim // 2, device = freqs.device).float() - low) / max(high - low, 0.001), 0, 1,
@@ -153,8 +155,8 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1)
     def rotate_half(x):
         #设我们有一个隐藏层向量 x，里面有 4 个数字：[A, B, C, D]。
         # x.shape[-1] // 2：就是找到向量的中点（4的一半是 2）
-        # x[..., x.shape[-1] // 2:]：拿走右半部分  [C, D]
-        # x[..., : x.shape[-1] // 2]：拿走左半部分  [A, B]
+        # x[..., x.shape[-1] // 2:]：拿走后半部分  [C, D]
+        # x[..., : x.shape[-1] // 2]：拿走前半部分  [A, B]
         # -x[...] (对右半边加负号)：右半边变成了 [-C, -D]
         # torch.cat(...) (把它们重新拼起来)：把加了负号的右半边放在前面，左半边放在后面
         # [A, B, C, D] 经过 rotate_half 处理后，变成了 [-C, -D, A, B]
