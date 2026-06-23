@@ -1,7 +1,7 @@
 from transformers import PretrainedConfig
 
 class MokioMindConfig(PretrainedConfig):
-    model_type = "mokiomind"
+    model_type = "Terencemind"
 
     def __init__(
         self,
@@ -89,6 +89,8 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
     def _norm(self, x):
+        #-1是取最后一个维度也就是沿着特征维度进行归一化
+        #rsqrt 是取反平方根（1/sqrt)
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim = True) + self.eps)
     
     def forward(self, x):
@@ -96,35 +98,50 @@ class RMSNorm(nn.Module):
 
 #Rope & YaRN    
 def precompute_freqs_cis(
+        #每个注意力头的特征维度
         dim:int, 
+        #预计算的最大序列长度
         end:int = int(32*1024), 
+        #RoPE的底数（LLaMA 1/2 默认10000， LLaMA 3提高到了500000/1e6）
         rope_base:float = 1e6, 
+        #是否启用上下文扩展
         rope_scaling : Optional[dict] = None):
     
-    freqs, attn_factors = (1.0 / rope_base ** (torch.arange(0, dim, 2)[:(dim // 2)].float()/dim),1.0)
+    #计算基础的旋转频率θ，原公式为 θ = 10000^(-2i/d), 其中2i 是维度的偶数索引 (0, 2, 4, 6)，
+    # [:(dim // 2)]是切片， 因为RoPE 旋转位置编码必须在“偶数维度”上成对操作
+    # 1/...是为了取倒数，也就是那个-号
+    freqs, attn_factor = (1.0 / rope_base ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim) , 1.0)
 
     if rope_scaling is not None:
         orig_max, factor, beta_fast, beta_slow, attn_factor = (
-            rope_scaling.get("original_max_position_embeddings", 2048),
-            rope_scaling.get("factor", 16),
-            rope_scaling.get("beta_fast", 32.0),
+            rope_scaling.get("original_max_position_embeddings", 2048), #模型最初训练时的最大长度
+            rope_scaling.get("factor", 16), #你想拉长的倍数，2048 * 16 = 32k 
+            rope_scaling.get("beta_fast", 32.0), #这个和下面的那个都是“波长” 用来界定哪些是高频，哪些是低频
             rope_scaling.get("beta_slow", 1.0),
-            rope_scaling.get("attention_factor", 1.0),
+            rope_scaling.get("attention_factor", 1.0), #注意力温度补偿系数，用来在变长后调整softmax的分布
             )
         if end / orig_max > 1.0:
+            #反推lambda = orig_max / b 求i
             inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))
 
             low, high = (
-                max(math.floor(inv_dim(beta_fast)), 0),
-                min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1),
-            )
-            ramp = torch.clamp(
-            (torch.arange(dim // 2, device = freqs.device).float() - low) / max(high - low, 0.001),0,1,
+                max(math.floor(inv_dim(beta_fast)), 0), #floor向下取整，尽量保住更多的高频细节不被修改
+                min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1), #ceil向上取整,为了让过渡区宽一点，减 1 是因为代码里的索引是从 0 开始的
             )
 
+            # torch.clamp(计算结果, 0, 1)，意思是“强制截断”！ 如果算出来的结果小于 0，强制变成 0，如果算出来的结果大于 1，强制变成 1
+            ramp = torch.clamp(
+            (torch.arange(dim // 2, device = freqs.device).float() - low) / max(high - low, 0.001), 0, 1,
+            )
+
+            #对于高频部分（局部细节）： 这里的 ramp 值为 0
+            #对于低频部分（全局长文）： 这里的 ramp 值为 1
+            #对于中频部分（过渡区）： 这里的 ramp 是 0 到 1 之间的小数（比如 0.5）。
             freqs = freqs * (1 - ramp + ramp / factor)
 
+        #获取每一个词的位置坐标
         t = torch.arange(end, device = freqs.device)
+        #计算每个词，每个维度的“绝对旋转角度” 角度 = 位置 * 频率
         freqs = torch.outer(t, freqs).float()
         freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim = -1) * attn_factor
         freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim = -1) * attn_factor
