@@ -55,3 +55,86 @@ RoPE 的天才之处在于，它彻底抛弃了“加法”，改用了“旋转
 **结论：** YaRN 就像是一个无损放大器。它通过区分频率的精细化操作，让你几乎不需要花多少算力重新训练，就能把现有模型的上下文处理能力拉长几倍甚至几十倍。
 
 ---
+## 公式的具体执行
+### 1. 基础旋转频率公式 (Base Rotation Frequency)
+
+计算基础旋转频率 $\theta_i$ 的原公式为：
+$$\theta_i = \text{base}^{-\frac{2i}{d}}$$
+
+> **参数说明：**
+> * $\text{base}$ 是底数（如代码中的 `rope_base`，通常是 10000）。
+> * $d$ 是每个注意力头特征维度大小（对应代码中的 `dim`）。
+> * $2i$ 是维度的偶数索引（$0, 2, 4, 6...$）。
+
+---
+
+### 2. 反推维度索引公式 (Wavelength Interpolation / `inv_dim`)
+
+这部分是 YaRN 算法的核心数学推导：**通过“波长”来寻找高低频的分界线。**
+
+#### 第一步：引入“波长”的物理直觉
+在 RoPE 中，每个维度的旋转速度不同。我们定义**波长 $\lambda$**（Wavelength）为：**需要多少个词（Token）的距离，这个维度刚好能旋转完整的一圈（$2\pi$）**。
+根据公式 $\text{波长} = \frac{2\pi}{\text{旋转频率}}$，我们可以得出第 $i$ 个维度的波长公式：
+$$\lambda_i = \frac{2\pi}{\theta_i} = 2\pi \cdot \text{base}^{\frac{2i}{d}}$$
+*(可以看出：维度索引 $i$ 越大，波长 $\lambda$ 越长，代表它处理的是距离越远的低频信息。)*
+
+#### 第二步：设定相对阈值（为什么是 $\lambda = \text{orig\_max} / b$ ？）
+YaRN 算法认为，不应该用绝对的距离来划分高低频，而应该看**波长占整个上下文窗口的比例**。
+于是引入了一个比例常数 $b$（代码中的 `beta_fast` 或 `beta_slow`）。
+
+算法规定，如果某个维度的波长 $\lambda_i$，刚好等于预训练最大长度（$\text{orig\_max}$）的 $\frac{1}{b}$，那这个维度就是一个**临界点**。
+所以我们列出等式：
+$$\lambda_i = \frac{\text{orig\_max}}{b}$$
+
+> **举个直观的例子：**
+> 假设模型原本最多看 2048 个词（$\text{orig\_max} = 2048$），定义高频的系数 $b = 32$ (`beta_fast`)。
+> 那么临界波长就是 $2048 / 32 = 64$。
+> 这意味着：**任何波长小于 64 个词的维度，都被认为是极其局部的“高频细节”，我们在拉伸文本时绝对不能修改它们！**
+
+#### 第三步：代入公式求解 $i$
+现在我们有了目标波长的等式，需要反推出这对应的是第几个维度（求 $i$）：
+$$2\pi \cdot \text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b}$$
+
+1. 将 $2\pi$ 移到等号右边：
+$$\text{base}^{\frac{2i}{d}} = \frac{\text{orig\_max}}{b \cdot 2\pi}$$
+
+2. 等式两边同时取自然对数（$\ln$）：
+$$\ln\left(\text{base}^{\frac{2i}{d}}\right) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)$$
+
+3. 根据对数运算法则，把指数提出来：
+$$\frac{2i}{d} \cdot \ln(\text{base}) = \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)$$
+
+4. 最后，把等式左边除了 $i$ 以外的东西全移到右边，大功告成：
+$$i = \frac{d \cdot \ln\left(\frac{\text{orig\_max}}{b \cdot 2\pi}\right)}{2 \cdot \ln(\text{base})}$$
+
+> **代码对应：** > 这个完美推导出来的结果，就是源码中那段长长的 lambda 函数：
+> `inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))`
+
+---
+
+### 3. 二维平面旋转公式与张量实现 (2D Rotation & `rotate_half` Magic)
+
+#### 标准二维平面旋转公式
+假设一个坐标 $(x, y)$ 要旋转 $\theta$ 角度，新坐标 $(x', y')$ 的公式是：
+* $x' = x \cdot \cos(\theta) - y \cdot \sin(\theta)$
+* $y' = x \cdot \sin(\theta) + y \cdot \cos(\theta)$
+
+#### 结合代码 `[A, B, C, D]` 的推导过程
+1. **原向量 $q$**：`[A, B, C, D]`
+2. **处理后的 `rotate_half(q)`**：`[-C, -D, A, B]`
+3. **假设对应的角度张量为**： 
+   * $\cos$：`[c_1, c_2, c_1, c_2]`
+   * $\sin$：`[s_1, s_2, s_1, s_2]`
+
+按照代码执行张量相加：`q_embed = (q * cos) + (rotate_half(q) * sin)` （k同理）
+
+* **前半部分维度（原来是 A 和 B，等效于 $x$ 坐标）：**
+  $$\text{新A} = A \cdot c_1 + (-C \cdot s_1) = A \cdot c_1 - C \cdot s_1$$
+  $$\text{新B} = B \cdot c_2 + (-D \cdot s_2) = B \cdot c_2 - D \cdot s_2$$
+
+* **后半部分维度（原来是 C 和 D，等效于 $y$ 坐标）：**
+  $$\text{新C} = C \cdot c_1 + A \cdot s_1 = A \cdot s_1 + C \cdot c_1$$
+  $$\text{新D} = D \cdot c_2 + B \cdot s_2 = B \cdot s_2 + D \cdot c_2$$
+
+> **结论与精妙之处：**
+> A 和 C 恰好完美形成了一对 $(x, y)$ 的旋转公式，B 和 D 形成了另一对。这段代码通过这种“左右互换”的张量拼接，避免了极其消耗内存的巨大旋转矩阵乘法，仅用简单的逐元素加法和乘法就完成了批量维度的成对旋转！

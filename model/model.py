@@ -151,9 +151,20 @@ def precompute_freqs_cis(
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1):
     def rotate_half(x):
+        #设我们有一个隐藏层向量 x，里面有 4 个数字：[A, B, C, D]。
+        # x.shape[-1] // 2：就是找到向量的中点（4的一半是 2）
+        # x[..., x.shape[-1] // 2:]：拿走右半部分  [C, D]
+        # x[..., : x.shape[-1] // 2]：拿走左半部分  [A, B]
+        # -x[...] (对右半边加负号)：右半边变成了 [-C, -D]
+        # torch.cat(...) (把它们重新拼起来)：把加了负号的右半边放在前面，左半边放在后面
+        # [A, B, C, D] 经过 rotate_half 处理后，变成了 [-C, -D, A, B]
         return torch.cat(
             (-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim = -1
         )
+    
+    # 应用二维平面旋转公式：
+    # x' = x * cos(θ) - y * sin(θ)
+    # y' = x * sin(θ) + y * cos(θ)
     q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)) * sin.unsqueeze(unsqueeze_dim)
     k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)) * sin.unsqueeze(unsqueeze_dim)
     return q_embed, k_embed
