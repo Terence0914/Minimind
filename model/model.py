@@ -181,7 +181,7 @@ def repeat_kv(x:torch.Tensor, n_rep:int) -> torch.Tensor:
     
     return(
         x[:,:,:,None,:]
-        .expand(bs, slen, num_key_value_heads, head_dim) # 广播扩张后形状为(bs, slen, num_key_value_heads, n_rep, head_dim)
+        .expand(bs, slen, num_key_value_heads, n_rep, head_dim) # 广播扩张后形状为(bs, slen, num_key_value_heads, n_rep, head_dim)
         .reshape(bs, slen, num_key_value_heads * n_rep, head_dim) #最终形状为(be, slen, num_key_value_heads * n_rep, head_dim)
     )
 
@@ -237,63 +237,84 @@ class Attention(nn.Module):
     #前向传播
     def forward(
             self,
-            x:torch.Tensor,
-            position_embeddings : Tuple[torch.Tensor, torch.Tensor],
-            past_key_value : Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-            use_cache = False,
+            x:torch.Tensor, #输入数据，形状为batch_size, sequence_length, hidden_size
+            position_embeddings : Tuple[torch.Tensor, torch.Tensor], #位置编码，定义成了一个包含两个Tensor的元组（因为我们用的是旋转位置编码）
+            past_key_value : Optional[Tuple[torch.Tensor, torch.Tensor]] = None, #KV Cache 键值缓存
+            use_cache = False, #在预训练阶段，不需要缓存历史
             attention_mask: Optional[torch.Tensor] = None,
     ):
+        #读取批次大小，序列长度
         bsz,seq_len,_ = x.shape
+        #线性投影
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
-        xq = xq.view(bsz, seq_len, self.n_local_heads, self.head_dim)
-        xk = xk.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
-        xv = xv.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
+        xq = xq.view(bsz, seq_len, self.n_local_heads, self.head_dim) #batch_size, seq_len, 8, 64
+        xk = xk.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim) #batch_size, seq_len, 2, 64
+        xv = xv.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim) #batch_size, seq_len, 2, 64
 
+        #旋转位置编码RoPE实现
         cos, sin = position_embeddings
         xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)
 
         #KV_cache 实现
         if past_key_value is not None:
-            xk = torch.cat([past_key_value[0], xk], dim = 1)
-            xv = torch.cat([past_key_value[1], xv], dim =1 )
+            xk = torch.cat([past_key_value[0], xk], dim = 1) #past_key_value[0]：索引拿到的就是历史的 K
+            xv = torch.cat([past_key_value[1], xv], dim = 1) #past_key_value[1]：索引拿到的就是历史的 V
         past_kv = (xk, xv) if use_cache else None
 
+        # 重组多头阵型
         xq, xk, xv = (
-            xq.transpose(1, 2),
-            repeat_kv(xk, self.n_rep).transpose(1, 2),
-            repeat_kv(xv, self.n_rep).transpose(1, 2),
+            xq.transpose(1, 2), #转置后batch_size, num_heads, seq_len, head_dim
+            repeat_kv(xk, self.n_rep).transpose(1, 2), #转置后batch_size, num_heads, seq_len, head_dim
+            repeat_kv(xv, self.n_rep).transpose(1, 2), #转置后batch_size, num_heads, seq_len, head_dim
         )
 
         if (
-            self.flash
-            and (seq_len > 1)
-            and (past_key_value is None)
-            and (attention_mask is None or torch.all(attention_mask == 1))
+            self.flash #调用Flash Attention 但是得满足下面3个条件
+            and (seq_len > 1) #如果 == 1，证明模型还在生成阶段，调用Flash Attention 算子反而会因为调度开销变慢，这个更适合一次性吃进长篇大论
+            and (past_key_value is None) #没有使用KV Cache,说明模型现在处于训练阶段，或者正在处理用户的初始输入提示词
+            and (attention_mask is None or torch.all(attention_mask == 1)) #要求没有传入极其特殊形状的矩阵掩码
         ):
+            #如果上述条件全部满足，一键包办计算带掩码的注意力公式
             output = F.scaled_dot_product_attention(
                 xq,
                 xk,
                 xv,
                 dropout_p = self.dropout if self.training else 0.0,
-                if_causal = True,
+                if_causal = True, #使用下三角掩码
             )
+        #如果上述条件没有满足，就纯手工
         else:
+            #attention 公式计算 Q*K^T / sqrt(dk),转置是为了矩阵乘法 -> seq_len, head_dim * head_dim, seq_len = seq_len, seq_len
             scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            #因果掩码，防止模型看到后面的词
+            #Batch_Size, n_heads, Q_seq_len, K_seq_len：，注意K_seq_len后面有个：,意味着只需要K序列的最后seq_len个
+            #-seq_len 只取最后一条维度的最后 seq_len 个元素
+            #triu 的全称是 Triangle Upper（上三角）, 保留矩阵右上方的元素，把左下方的元素强行变成 0
+            #diagonal = 1：triu 的切割线会向上平移一格, 默认也是1
             scores [:, :, :, -seq_len:] += torch.triu(
                 torch.full((seq_len, seq_len), float("-inf"), device = scores.device),
                 diagonal = 1,
             )
 
+            #填充掩码，一个batch里的句子长短不一，为了补齐张量，需要填充大量的填充符<pad>
             if attention_mask is not None:
-                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-                extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
+                #两个unsqueeze是因为掩码通常是一个二维，需要和多头注意力4维张量补齐
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2) 
+                #如果原本是真实词，为1, (1.0 - 1) * -1e9 = 0 对分数没有影响
+                #如果原本是填充词，为0, (1.0 - 0) * -1e9 = -1e9, 分数模型不会将注意力放在这里
+                extended_attention_mask = (1.0 - extended_attention_mask) * -1e9 
+                # 一票否决的作用，分辨哪些是有用的，哪些是填充的
                 scores = scores + extended_attention_mask
-
-            scores = F.softmax( scores.flaot(), dim = -1).type_as(xq)
+            
+            #归一化
+            scores = F.softmax(scores.float(), dim = -1).type_as(xq)
             scores = self.attn_dropout(scores)
+            #把算好、清理过、且转化为概率分布的注意力权重矩阵，去乘以包含实际内容特征 value
             output = scores @ xv
 
+        #转置回原型，然后把n_heads, head_dim 压缩成一个维度 -> batch_size, seq_len, 512
         output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
+        #把不同的注意力头融合和信息交互，过一次dropout防止过拟合
         output = self.resid_dropout(self.o_proj(output))
         return output, past_kv
 
