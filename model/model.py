@@ -205,7 +205,7 @@ class Attention(nn.Module):
         #计算单头维度
         self.head_dim = args.hidden_size // args.num_attention_heads  #64
 
-        #线性变换矩阵
+        #线性变换矩阵wx + b, 但是在大模型预训练中，不太需要加偏置了
         #nn.Linear(输入维度，输出维度)
         #Q投影，输入512，输出512
         self.q_proj = nn.Linear(
@@ -233,3 +233,68 @@ class Attention(nn.Module):
             hasattr(torch.nn.functional, "scaled_dot_product_attention")
             and args.flash_attention
         )
+    
+    #前向传播
+    def forward(
+            self,
+            x:torch.Tensor,
+            position_embeddings : Tuple[torch.Tensor, torch.Tensor],
+            past_key_value : Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+            use_cache = False,
+            attention_mask: Optional[torch.Tensor] = None,
+    ):
+        bsz,seq_len,_ = x.shape
+        xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+        xq = xq.view(bsz, seq_len, self.n_local_heads, self.head_dim)
+        xk = xk.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
+        xv = xv.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
+
+        cos, sin = position_embeddings
+        xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)
+
+        #KV_cache 实现
+        if past_key_value is not None:
+            xk = torch.cat([past_key_value[0], xk], dim = 1)
+            xv = torch.cat([past_key_value[1], xv], dim =1 )
+        past_kv = (xk, xv) if use_cache else None
+
+        xq, xk, xv = (
+            xq.transpose(1, 2),
+            repeat_kv(xk, self.n_rep).transpose(1, 2),
+            repeat_kv(xv, self.n_rep).transpose(1, 2),
+        )
+
+        if (
+            self.flash
+            and (seq_len > 1)
+            and (past_key_value is None)
+            and (attention_mask is None or torch.all(attention_mask == 1))
+        ):
+            output = F.scaled_dot_product_attention(
+                xq,
+                xk,
+                xv,
+                dropout_p = self.dropout if self.training else 0.0,
+                if_causal = True,
+            )
+        else:
+            scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            scores [:, :, :, -seq_len:] += torch.triu(
+                torch.full((seq_len, seq_len), float("-inf"), device = scores.device),
+                diagonal = 1,
+            )
+
+            if attention_mask is not None:
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+                extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
+                scores = scores + extended_attention_mask
+
+            scores = F.softmax( scores.flaot(), dim = -1).type_as(xq)
+            scores = self.attn_dropout(scores)
+            output = scores @ xv
+
+        output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
+        output = self.resid_dropout(self.o_proj(output))
+        return output, past_kv
+
+
