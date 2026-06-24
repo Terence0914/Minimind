@@ -1,7 +1,7 @@
 from transformers import PretrainedConfig
 
 class MokioMindConfig(PretrainedConfig):
-    model_type = "Terencemind"
+    model_type = "mokiomind"
 
     def __init__(
         self,
@@ -170,3 +170,66 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1)
     q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)) * sin.unsqueeze(unsqueeze_dim)
     k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)) * sin.unsqueeze(unsqueeze_dim)
     return q_embed, k_embed
+
+def repeat_kv(x:torch.Tensor, n_rep:int) -> torch.Tensor:
+    #bs: batch_size
+    #slen:sequence Length
+    #n_rep: 重复的倍数
+    bs, slen, num_key_value_heads, head_dim = x.shape
+    if n_rep == 1:
+        return x
+    
+    return(
+        x[:,:,:,None,:]
+        .expand(bs, slen, num_key_value_heads, head_dim) # 广播扩张后形状为(bs, slen, num_key_value_heads, n_rep, head_dim)
+        .reshape(bs, slen, num_key_value_heads * n_rep, head_dim) #最终形状为(be, slen, num_key_value_heads * n_rep, head_dim)
+    )
+
+#GQA - 4个query向量匹配一个KV值
+class Attention(nn.Module):
+    def __init__(self, args:MokioMindConfig):
+        super().__init__()
+
+        self.num_key_value_heads = (
+            args.num_attention_heads #配置中给了8个
+            if args.self.num_key_value_heads is None
+            else args.num_key_value_heads
+        )
+
+        assert args.num_attention_heads % self.num_key_value_heads == 0
+
+        self.n_local_heads = args.num_attention_heads #8个
+        self.n_local_kv_heads = self.num_key_value_heads #2个
+        #计算重复倍数
+        self.n_rep = self.n_local_heads // self.n_local_kv_heads #4次
+        #计算单头维度
+        self.head_dim = args.hidden_size // args.num_attention_heads  #64
+
+        #线性变换矩阵
+        #nn.Linear(输入维度，输出维度)
+        #Q投影，输入512，输出512
+        self.q_proj = nn.Linear(
+            args.hidden_size, args.num_attention_heads * self.head_dim, bias = False
+        )
+        #512压缩4倍为128，也就是说在这里，Q的头数是KV头数的4倍
+        #K投影，输入512，输出128
+        self.k_proj = nn.Linear(
+            args.hidden_size, self.num_key_value_heads * self.head_dim, bias = False
+        )
+        #V投影，输入512，输出128
+        self.v_proj = nn.Linear(
+            args.hidden_size, self.num_key_value_heads * self.head_dim, bias = False
+        )
+        #Output 投影，后续进行结果拼接，输入512， 输出512
+        self.o_proj = nn.Linear(
+            args.num_attention_heads * self.head_dim, args.hidden_size, bias = False
+        )
+        #随机失活防止过拟合，虽然在大模型预训练中防止过拟合是直接投入海量数据，但也要定义一下
+        self.attn_dropout = nn.Dropout(args.dropout)
+        self.resid_dropout = nn.Dropout(args.dropout)
+        self.dropout = args.dropout
+        #检查当前pytorch版本是否支持原生功能
+        self.flash = (
+            hasattr(torch.nn.functional, "scaled_dot_product_attention")
+            and args.flash_attention
+        )
