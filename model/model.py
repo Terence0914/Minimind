@@ -357,28 +357,41 @@ class MoEGate(nn.Module):
     def __init__(self, config: MokioMindConfig):
         super().__init__()
         self.config = config
-        self.top_k = config.num_experts_per_tok
+        #稀疏激活参数：2， 模型选出得分最高的2个专家进行前向传播
+        self.top_k = config.num_experts_per_tok 
+        #参与动态路由的专家总数：4
         self.n_routed_experts = config.n_routed_experts
 
+        #定义了计算专家得分的函数
         self.scoring_func = config.scoring_func
+        #用于控制辅助损失（Auxiliary Loss） - 确保所有的底层硬件算力（所有专家）都能得到充分且均匀的利用
         self.alpha = config.aux_loss_alpha
         self.seq_aux = config.seq_aux
 
+        #概率分布处理，决定在选出top-k个专家后，是否将这几个专家的路由概率重新归一化处理，使得被选中专家的权重分布之和为 1
         self.norm_topk_prob = config.norm_topk_prob
         self.gating_dim = config.hidden_size
+        #将权重声明为可学习张量，初始化为空张量，形状为4 x 隐藏层维度
         self.weight = nn.Parameter(
             torch.empty((self.n_routed_experts, self.gating_dim))
         )
+        #赋予合理的初始值分布
         self.reset_parameters()
 
+    #调用kaiming初始化 - 为了在深层网络中维持信号方差的稳定
     def reset_parameters(self) -> None:
+        #传入sqrt(5)是为了符合U（-bound, bound)的均匀分布
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states):
+        #维度展平， 因为在MoE中，路由决策是token级别的，它不关心这个 Token 属于哪一句话或哪一个批次
+        #因此，代码使用 .view(-1, h) 将前两个维度合并，把所有的 Token 排成一列长队，形状变成了 [总Token数, 隐藏层维度]
         bsz, seq_len, h = hidden_states.shape
         hidden_states = hidden_states.view(-1, h)
+        #原始打分 总token数，隐藏层维度 * 隐藏层维度，专家总数（公式自带转置） —>  总token数，专家总数
         logits = F.linear(hidden_states, self.weight, None)
-
+        
+        #为了将其转化为标准的概率分布，代码在最后一个维度（dim=-1，即专家维度）上应用了 Softmax 函数（概率加起来严格等于1.0）
         if self.scoring_func == "softmax":
             scores = logits.softmax(dim=-1)
         else:
@@ -386,37 +399,60 @@ class MoEGate(nn.Module):
                 f"insupportable scoring function for MoE gating: {self.scoring_func}"
             )
 
+        #torch.topk 函数会遍历每一个 Token 的专家概率分布，只保留概率最大的前 K 个（这里是2个）
+        #topk_weight 记录被选中的这K个专家的具体概率值
+        #topk_idx 记录了被选中的那 K 个专家的编号
         topk_weight, topk_idx = torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
 
+        #如果只选1个专家，那么它占据了所有被激活的份额，不需要归一化。
+        #只有当选了 2 个或更多专家时，才需要把它们各自残缺的概率加起来放大到 1.0
         if self.top_k > 1 and self.norm_topk_prob:
+            #keepdim=True 防止维度坍缩
+            #1e-20 防止除零灾难
             denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
+            #执行归一化除法
             topk_weight = topk_weight / denominator
 
+        #辅助损失函数的计算 - 类似绩效考核
+        #辅助损失只在训练阶段（Training）计算
         if self.training and self.alpha > 0.0:
             scores_for_aux = scores
             aux_topk = self.top_k
+            #数据塑性 -> batch_size, seq_len * Top_K
             topk_idx_for_aux_loss = topk_idx.view(bsz, -1)
             if self.seq_aux:
                 scores_for_seq_aux = scores_for_aux.view(bsz, seq_len, -1)
+                #ce 记账本- 记录在这个批次中，每个专家被每条序列调用了多少次
                 ce = torch.zeros(
                     bsz, self.n_routed_experts, device=hidden_states.device
                 )
+                #scatter_add 根据 topk_idx_for_aux_loss（选中的专家编号），把 torch.ones（每次算1票）累加到 ce 这个记账本对应的位置上。
+                # 执行完后，ce 里面装的就是每个专家实际分到的 Token 数量
                 ce.scatter_add_(
                     1,
                     topk_idx_for_aux_loss,
                     torch.ones(bsz, seq_len * aux_topk, device=hidden_states.device),
+                #算出 总任务量 / 公平配额， 数值越大，说明这个专家越被过度使用
                 ).div_(seq_len * aux_topk / self.n_routed_experts)
+                #ce 和 scores_for_seq_aux相乘，两项如果都很高，乘积就会极大，产生的 aux_loss 就越大，从而在反向传播时狠狠惩罚路由器，逼迫它把 Token 分给其他专家
                 aux_loss = (ce * scores_for_seq_aux.mean(dim=1)).sum(
                     dim=1
                 ).mean() * self.alpha
             else:
+                #独热编码
+                #num_classes=self.n_routed_experts是为了固定生成n_routed_experts（这里是4）列
                 mask_ce = F.one_hot(
                     topk_idx_for_aux_loss.view(-1), num_classes=self.n_routed_experts
                 )
+                #在所有 Token 维度上求平均。得出的 ce 是一个长度为专家总数的向量，代表实际分配给每个专家的 Token 比例
                 ce = mask_ce.float().mean(0)
+                #路由器对每个专家的平均预测概率
                 Pi = scores_for_aux.mean(0)
+                #Loss = alpha * sum (P_i * f_i * N)
                 fi = ce * self.n_routed_experts
                 aux_loss = (Pi * fi).sum() * self.alpha
+
+        #如果是推理阶段，直接生成一个数值为 0 的张量作为 aux_loss
         else:
             aux_loss = scores.new_zeros(1).squeeze()
         return topk_idx, topk_weight, aux_loss
