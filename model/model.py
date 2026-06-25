@@ -318,4 +318,38 @@ class Attention(nn.Module):
         output = self.resid_dropout(self.o_proj(output))
         return output, past_kv
 
+#前馈神经网络
+class FeedForward(nn.Module):
+    def __init__(self, config: MokioMindConfig):
+        super(). __init__()
+        if config.intermediate_size is None:
+            #乘以8/3是保持模型参数量和计算量的不变
+            intermediate_size = int(config.hidden_size * 8 / 3) # -> 512 * （8/3） = 1365
+            #硬件对齐 - 硬件在处理 64 的倍数的矩阵时，效率最高
+            config.intermediate_size = 64 * ((intermediate_size + 64 - 1) // 64) # intermediate_size = 1408
+
+        #注意x进来后，是同时进入了两个线性层gate & up
+        #门控投影： 输入512， 输出1408， 把512 维放大到1408维
+        self.gate_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias = False
+        )
+         #上升投影：同样输入维度512，输出维度1408，提取丰富的特征
+        self.up_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias = False
+        )
+        #下降投影：输入维度1408，输出维度512，等前两步在 1408 维的空间里相乘筛选完之后，再把这 1408 维的结果，重新压缩回 512 维，方便传递给下一层 Transformer
+        self.down_proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias = False
+        )
+        self.dropout = nn.Dropout(config.dropout)
+        #激活函数
+        self.act_fn = ACT2FN[config.hidden_act]
+
+    def forward(self, x):
+        # 经过 gate_proj 放大并穿过激活函数，生成了一个“过滤器”（值通常在 0 到 1 之间徘徊）->用作门控开关
+        # 经过 up_proj 放大，提取出丰富的特征，两者相乘，哪些特征是重要的（保留），哪些是不重要的（被削弱）-> 用作提取丰富特征
+        gated = self.act_fn(self.gate_proj(x)) * self.up_proj(x) #1408维度
+        #返回压缩降维- 512 维
+        return self.dropout(self.down_proj(gated))
+    
 
