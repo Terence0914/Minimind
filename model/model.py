@@ -333,11 +333,11 @@ class FeedForward(nn.Module):
         self.gate_proj = nn.Linear(
             config.hidden_size, config.intermediate_size, bias = False
         )
-         #上升投影：同样输入维度512，输出维度1408，提取丰富的特征
+         #升维：同样输入维度512，输出维度1408，提取丰富的特征
         self.up_proj = nn.Linear(
             config.hidden_size, config.intermediate_size, bias = False
         )
-        #下降投影：输入维度1408，输出维度512，等前两步在 1408 维的空间里相乘筛选完之后，再把这 1408 维的结果，重新压缩回 512 维，方便传递给下一层 Transformer
+        #降维：输入维度1408，输出维度512，等前两步在 1408 维的空间里相乘筛选完之后，再把这 1408 维的结果，重新压缩回 512 维，方便传递给下一层 Transformer
         self.down_proj = nn.Linear(
             config.intermediate_size, config.hidden_size, bias = False
         )
