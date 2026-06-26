@@ -561,3 +561,4 @@ class MoEFeedForward(nn.Module):
                 0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out
             )
         return expert_cache
+    
