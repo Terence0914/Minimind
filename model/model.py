@@ -473,18 +473,24 @@ class MoEFeedForward(nn.Module):
     
     def forward(self, x):
         identity = x
+        #获得维度大小（3维）
         orig_shape = x.shape
+        #赋值给这三个变量
         bsz, seq_len, h = orig_shape
 
         #使用门控机制选择专家
         topk_idx, topk_weight, aux_loss = self.gate(x)
         #展开x以便处理
+        #x.shape[-1]保持最后一个维度不变，前面-1是自动计算前两个维度相乘的总数
+        #维度大小：bsz * seq_len, h
         x = x.view(-1, x.shape[-1])
-
         flat_topk_idx = topk_idx.view(-1)
+
+        #是否在训练模式
         if self.training:
             #按照定义的num_experts_per_tok重复输入token
             #每个token安排num_experts_per_tok个专家处理
+            #沿着第0维- token 数量
             x = x.repeat_interleave(self.config.num_experts_per_tok, dim = 0)
             #y是空张量，和x形状相同
             y = torch.empty_like(x, dtype = x.dtype)
@@ -495,13 +501,16 @@ class MoEFeedForward(nn.Module):
                 #最后将结果放回y对应位置
                 expert_out = expert(x[flat_topk_idx == i])
                 if expert_out.shape[0] > 0:
+                    #放回y那个空的箱里
                     y[flat_topk_idx == i] = expert_out.to(y.dtype)
                 else:
                     y[flat_topk_idx == i] = expert_out.to(y.dtype) + 0 *sum(
                         p.sum() for p in expert.parameters()
                     )
             #加权求和
-            #最后的y意义是每个token经过专家处理后的加权结果
+            #y.view(*topk_weight.shape, -1)变回原来维度（3维）
+            #* topk_weight.unsqueeze(-1)，算出的权重（Top_K 权重）乘到对应的专家输出上，.sum(dim=1)沿着Top_k求和
+            #最后的y意义是每个token经过专家处理后的加权结果，恢复成最开始传入该层时的三维形状
             y = (y.view(*topk_weight.shape, -1) * topk_weight.unsqueeze(-1).sum(dim=1))
             y = y.view(*orig_shape)
         #如果是推理阶段
@@ -546,6 +555,8 @@ class MoEFeedForward(nn.Module):
             #加权
             expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
             #将结果散点加在缓存中对应位置
+            #catter_add_(dim, index, src) 根据行/列，进行index指定的地址投递，src是投递的具体内容
+            #view(-1,1)变成一列，假设x.shape[-1] 隐藏层维度是4，repeat(1,4)就是横向复印4次
             expert_cache.scatter_add_(
                 0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out
             )
