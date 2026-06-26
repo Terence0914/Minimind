@@ -562,3 +562,52 @@ class MoEFeedForward(nn.Module):
             )
         return expert_cache
     
+class MokioMindBlock(nn.Module):
+    def __init__(self, layer_id:int, config:MokioMindConfig):
+        super().__init__()
+        self.num_attention_heads = config.num_attention_heads
+        self.hidden_size = config.hidden_size
+        #计算每一个注意力“头”处理的向量维度大小
+        self.head_dim = config.hidden_size // config.num_attention_heads
+        self.self_attention = Attention(config)
+
+        self.layer_id = layer_id
+        #自注意力模块之前使用的层归一化模块
+        self.input_layernorm = RMSNorm(config.hidden_size, eps = config.rms_norm_eps)
+        #前馈神经网络（MLP）之前使用的层归一化模块
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size, eps = config.rms_norm_eps
+        )
+        self.mlp = (
+            FeedForward(config)
+            if not config.use_moe
+            else MoEFeedForward(config)
+        )
+    
+    def forward(
+            self,
+            hidden_states,
+            position_embeddings: Tuple[torch.Tensor, torch.Tensor],
+            past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+            use_cache = False,
+            attention_mask: Optional[torch.Tensor] = None,
+    ):
+        res = hidden_states
+
+        hidden_states, present_key_value = self.self_attention(
+            #进入注意力模块之前过一次归一化
+            self.input_layernorm(hidden_states),
+            position_embeddings,
+            past_key_value,
+            use_cache,
+            attention_mask,
+        )
+        #残差连接
+        hidden_states = res + hidden_states
+        
+        #在数据进入MLP之前，再次进行层归一化，传入self.mlp()进行非线性变换
+        #然后再进行一次残差连接
+        hidden_states = hidden_states + self.mlp(
+            self.post_attention_layernorm(hidden_states)
+        )
+        return hidden_states, present_key_value
