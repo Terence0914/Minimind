@@ -97,7 +97,7 @@ class RMSNorm(nn.Module):
         return self.weight * self._norm(x.float()).type_as(x)
 
 #RoPE & YaRN    
-def precompute_freqs_cis(
+def precompute_freqs(
         #每个注意力头的特征维度
         dim:int, 
         #预计算的最大序列长度
@@ -105,7 +105,8 @@ def precompute_freqs_cis(
         #RoPE的底数（LLaMA 1/2 默认10000， LLaMA 3提高到了500000/1e6）
         rope_base:float = 1e6, 
         #是否启用上下文扩展
-        rope_scaling : Optional[dict] = None):
+        rope_scaling : Optional[dict] = None,
+):
     
     #计算基础的旋转频率θ，原公式为 θ = 10000^(-2i/d), 其中2i 是维度的偶数索引 (0, 2, 4, 6)，
     # [:(dim // 2)]是切片， 因为RoPE 旋转位置编码必须在“偶数维度”上成对操作
@@ -611,3 +612,83 @@ class MokioMindBlock(nn.Module):
             self.post_attention_layernorm(hidden_states)
         )
         return hidden_states, present_key_value
+
+class MokioMindModel(nn.Module):
+    def __init__(self, config: MokioMindConfig):
+        super().__init__()
+        self.config = config
+        self.vocab_size, self.num_hidden_layers = (
+            config.vocab_size,
+            config.num_hidden_layers,
+        )
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.dropout = nn.Dropout(config.dropout)
+        self.layers = nn.ModuleList(
+            [MokioMindBlock(1, config) for l in range(self.num_hidden_layers)]
+        )
+        self.norm = RMSNorm(config.hidden_size, eps = config.rms_norm_eps)
+
+        freqs_cos, freqs_sin = precompute_freqs(
+            dim = config.hidden_size // config.num_attention_heads,
+            end = config.max_position_embeddings,
+            rope_base = config.rope_theta,
+            rope_scaling= config.rope_scaling,
+        )
+        self.register_buffer("freqs_cons", freqs_cos, persistent = False)
+        self.register_buffer("freqs_sin", freqs_sin, persistent = False)
+
+    def forward(
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+            use_cache: bool = False,
+            **kwargs,
+    ):
+        batch_size, seq_length = input_ids.shape
+
+        if hasattr(past_key_values, "layers"):
+            past_key_values = None
+
+        past_key_values = past_key_values or [None] * len(self.layers)
+
+        start_pos = (
+            past_key_values[0][0].shape[1] if past_key_values[0] is not None else 0
+        )
+
+        #Embedding + dropout
+        hidden_states = self.dropout(
+            self.embed_tokens(input_ids)
+        )
+
+        postition_embeddings = (
+            self.freqs_cos[start_pos : start_pos + seq_length],
+            self.freqs_sin[start_pos : start_pos + seq_length],
+        )
+        presents = []
+        for layer_idx, (layer, past_key_value) in enumerate(
+            zip(self.layers,past_key_values)
+        ):
+            hidden_states, present = layer(
+                hidden_states,
+                postition_embeddings,
+                past_key_value = past_key_value,
+                use_cache = use_cache,
+                attention_mask = attention_mask
+            )
+            presents.append(present)
+        
+        hidden_states = self.norm(hidden_states)
+
+        aux_loss = sum(
+            [
+                layer.mlp.aux_loss
+                for layer in self.layers
+                if isinstance(
+                    layer.mlp, MoEFeedForward
+                )
+            ],
+            hidden_states.new_zeros(1).squeeze()
+        )
+
+        return hidden_states, presents, aux_loss
