@@ -6,10 +6,14 @@
 * **Python**: 3.12
 * **Pytorch**: 2.9.1
 * **CUDA**: 12.8
+* **pandas**
+* **numpy**
 * **datasets**: `pip install datasets`
 * **swanlab**: `pip install swanlab`
+* **transformer**:`pip install transformer`
 
-配置：4090 24GB
+配置：4090 24GB - 大概2小时
+训练完的模型叫（预训练版本）：pretrain_512.pth
 
 ## 数据准备 (Data Preparation)
 

@@ -184,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_path",
         type=str,
-        default="../dataset/pretrain_hq.jsonl",  # ！修正：原"dataset/..."缺少../前缀
+        default="dataset/pretrain_hq.jsonl",  
         help="预训练数据路径",
     )
     parser.add_argument(
@@ -348,7 +348,7 @@ if __name__ == "__main__":
                 pin_memory=True,
             )
             Logger(
-                f"Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始"
+                f"Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step, 从step {start_step + 1}开始"
             )
             train_epoch(epoch, loader, len(loader) + start_step, start_step, wandb)
         else:  # 默认从头开始
