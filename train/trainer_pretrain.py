@@ -15,9 +15,9 @@ from torch import optim  # 优化器
 from torch.nn.parallel import DistributedDataParallel  # 分布式数据并行
 from torch.utils.data import DataLoader, DistributedSampler  # 数据加载器
 
-from model.MokioModel import MokioMindConfig
-from dataset.lm_dataset import PretrainDataset
-from trainer.trainer_utils import (  # 训练工具函数
+from model.model import MokioMindConfig
+from dataset.Im_dataset import PretrainDataset
+from train.trainer_utils import (  # 训练工具函数
     get_lr,
     Logger,
     is_main_process,
@@ -255,9 +255,9 @@ if __name__ == "__main__":
     # ========== 3. 设置混合精度 ==========
     """
     📚 混合精度训练知识点：
-    - bfloat16: Google开发，数值范围大，更稳定
+    - bfloat16: Google开发,数值范围大,更稳定
     - float16: 标准半精度，节省内存但可能溢出
-    - autocast: 自动选择精度，关键运算用float32
+    - autocast: 自动选择精度,关键运算用float32
     """
     device_type = "cuda" if "cuda" in args.device else "cpu"
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
