@@ -639,10 +639,10 @@ class MokioMindModel(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor] = None, #输入的token序列
         attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
-        use_cache: bool = False,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None, #KV Cache
+        use_cache: bool = False, #布尔值，指示当前前向传播是否需要返回新的 KV Cache 供下一步使用
         **kwargs,
     ):
         # input_ids: [bsz, seq_len]
