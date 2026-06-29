@@ -24,13 +24,15 @@
 
 ### 1. 数据下载
 请从以下地址下载预训练数据集 `pretrain_hq.jsonl`：
+- [点击下载：Minimind 数据集 (Hugging Face)](https://huggingface.co/datasets/jingyaogong/minimind_dataset/tree/6b952cc50427c84eac543d0b38a8066208433847)
 
-- [点击下载：Minimind 预训练数据集 (Hugging Face)](https://huggingface.co/datasets/jingyaogong/minimind_dataset/blob/6b952cc50427c84eac543d0b38a8066208433847/pretrain_hq.jsonl)
+**注：** 预训练完成后，请在上述同一链接地址中，继续下载微调数据集 `sft_mini_512.jsonl`，以为后续阶段做准备。
 
 ### 2. 存放路径
-下载完成后，请将该文件移动至项目根目录下的 `dataset/` 文件夹中，确保路径如下：
-`dataset/pretrain_hq.jsonl`
+下载完成后，请将这两个文件移动至项目根目录下的 `dataset/` 文件夹中。请确保最终的文件目录结构如下：
 
+* `dataset/pretrain_hq.jsonl`
+* `dataset/sft_mini_512.jsonl`
 ---
 
 ## 模型架构 (Model Architecture)
