@@ -126,8 +126,8 @@ def precompute_freqs(
             inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))
 
             low, high = (
-                max(math.floor(inv_dim(beta_fast)), 0), #floor向下取整，尽量保住更多的高频细节不被修改
-                min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1), #ceil向上取整,为了让过渡区宽一点，减 1 是因为代码里的索引是从 0 开始的
+                max(math.floor(inv_dim(beta_fast)), 0), #floor向下取整，尽量保住更多的高频细节不被修改，同时确保计算出的索引不会小于 0
+                min(math.ceil(inv_dim(beta_slow)), dim // 2 - 1), #ceil向上取整,为了让过渡区宽一点，减 1 是因为代码里的索引是从 0 开始的，同时确保索引不会超过 RoPE 编码的最大维度范围
             )
 
             #ramp = i - low / high - low
