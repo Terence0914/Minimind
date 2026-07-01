@@ -172,6 +172,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1)
     k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)) * sin.unsqueeze(unsqueeze_dim)
     return q_embed, k_embed
 
+
 #repeat_kv是因为后续GQA中，4个query向量匹配一个kv值，在后续计算attention的时候，维度对不齐，所以需要repeat_kv来和query向量对其
 def repeat_kv(x:torch.Tensor, n_rep:int) -> torch.Tensor:
     #bs: batch_size
