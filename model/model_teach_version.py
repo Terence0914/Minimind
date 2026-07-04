@@ -561,7 +561,7 @@ class MoEFeedForward(nn.Module):
             #加权
             expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
             #将结果散点加在缓存中对应位置
-            #catter_add_(dim, index, src) 根据行/列，进行index指定的地址投递，src是投递的具体内容
+            #scatter_add_(dim, index, src) 根据行/列，进行index指定的地址投递，src是投递的具体内容
             #view(-1,1)变成一列，假设x.shape[-1] 隐藏层维度是4，repeat(1,4)就是横向复印4次
             expert_cache.scatter_add_(
                 0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out
