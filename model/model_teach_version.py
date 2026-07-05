@@ -574,7 +574,8 @@ class MokioMindBlock(nn.Module):
         self.num_attention_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
         #计算每一个注意力“头”处理的向量维度大小
-        self.head_dim = config.hidden_size // config.num_attention_heads
+        self.head_dim = config.hidden_size // config.num_attention_heads #512 // 8 = 64
+        #调用自注意GQA
         self.self_attention = Attention(config)
 
         self.layer_id = layer_id
@@ -584,6 +585,7 @@ class MokioMindBlock(nn.Module):
         self.post_attention_layernorm = RMSNorm(
             config.hidden_size, eps = config.rms_norm_eps
         )
+        #调用Dense - Model FFN
         self.mlp = (
             FeedForward(config)
             if not config.use_moe
