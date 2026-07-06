@@ -113,6 +113,9 @@ class PretrainDataset(Dataset):
         return input_ids, labels, attention_mask
 
 
+
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. SFTDataset —— 有监督微调（Supervised Fine-Tuning）数据集
 # ──────────────────────────────────────────────────────────────────────────────
