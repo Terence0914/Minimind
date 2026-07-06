@@ -655,6 +655,7 @@ class MokioMindModel(nn.Module):
         # input_ids: [bsz, seq_len]
         batch_size, seq_length = input_ids.shape
 
+        #检查是否具有某个属性
         if hasattr(past_key_values, "layers"):
             past_key_values = None
 
@@ -675,6 +676,9 @@ class MokioMindModel(nn.Module):
             self.freqs_sin[start_pos : start_pos + seq_length],
         )
         presents = []
+        # 为什么加括号？
+        # 因为 enumerate(zip) 产生的数据是嵌套结构：(索引, (当前层, 历史缓存))
+        # 加括号是为了让变量结构与数据结构对齐，进行精确的嵌套元组解包(Tuple Unpacking)
         for layer_idx, (layer, past_key_value) in enumerate(
             zip(self.layers, past_key_values)
         ):
