@@ -733,20 +733,34 @@ class MokioMindForCausalLM(PreTrainedModel, GenerationMixin):
             **args,
         )
 
+        #只计算需要的最后一个词的概率
         slice_indices = (
             slice(-logits_to_keep, None)
             if isinstance(logits_to_keep, int)
             else logits_to_keep
         )
+        #计算原始得分
         logits = self.lm_head(hidden_states[:, slice_indices, :])
 
+        # 错位对齐
         loss = None
         if labels is not None:
+            # -1代表掐掉最后一位
+            # 因为最后一个词的预测结果（基于 ABCD 预测 E）没有对应的标签可以核对，所以直接丢弃不用
             shift_logits = logits[..., :-1, :].contiguous()
+            # 掐掉第一位
+            # 第一个词 A 前面没有任何输入，它无法作为“下一个词”被预测出来，所以 A 不能作为答案去跟任何人的预测对齐。
+            # 真正需要被预测的答案是从 B 开始的
             shift_labels = labels[..., 1:].contiguous()
+            # 计算交叉熵
+            # shift_logits.view(-1, shift_logits.size(-1))
+            # 将立体的预测结果“压扁”成二维表格，行是所有的 Token，列是词表大小，方便算分
+            # shift_labels.view(-1)
+            # 将答案也压扁成一维列表，跟上面的每一行一一对应
             loss = F.cross_entropy(
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1),
+                # 在处理长短不一的句子时，我们会用填充符（Padding）把短句补齐
                 ignore_index=-100,
             )
 
