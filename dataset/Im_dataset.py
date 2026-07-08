@@ -11,7 +11,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # 全局预处理 / 后处理工具函数
 # ──────────────────────────────────────────────────────────────────────────────
 
-
+# 百分之80概率什么都不做，百分之20概率从system_prompt随机选中一条进行插入
+# 这有效提升泛化能力（适应有/无 System Prompt 的情况）
 def pre_processing_chat(conversations, add_system_ratio=0.2):
     """
     对话前处理：以一定概率随机插入 system 消息。
@@ -55,8 +56,11 @@ def post_processing_chat(prompt_content, empty_think_ratio=0.05):
     """
     if (
         "<think>\n\n</think>\n\n" in prompt_content
+        # 如果文本里真的有这个空块，就掷一个 0 到 1 之间的随机小数（random.random()）
+        # 只有当这个随机数大于 0.05 的时候（也就是有 95% 的概率），条件才算完全成立
         and random.random() > empty_think_ratio
     ):
+        # 只有上面满足了，全部替换成空字符
         prompt_content = prompt_content.replace("<think>\n\n</think>\n\n", "")
     return prompt_content
 
