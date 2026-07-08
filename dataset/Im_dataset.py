@@ -43,6 +43,7 @@ def pre_processing_chat(conversations, add_system_ratio=0.2):
     return conversations
 
 
+# 大概率情况下是直接删掉，小概率，也就是到了百分之5附近，才保留
 def post_processing_chat(prompt_content, empty_think_ratio=0.05):
     """
     对话后处理：清理模板渲染后多余的空 <think> 块。
@@ -93,6 +94,7 @@ class PretrainDataset(Dataset):
         # Step 1：tokenize 原始文本，留出首尾各 1 个 token 的位置给 BOS/EOS
         tokens = self.tokenizer(
             str(sample["text"]),
+            # 暂时不用加特殊的开头/结尾符号
             add_special_tokens=False,
             max_length=self.max_length - 2,  # 预留 BOS + EOS 的位置
             truncation=True,
@@ -105,6 +107,7 @@ class PretrainDataset(Dataset):
         input_ids = tokens + [self.tokenizer.pad_token_id] * (
             self.max_length - len(tokens)
         )
+        # 把这个 Python 列表转换成 PyTorch 的 tensor（张量），数据类型指定为 64 位整数 torch.long
         input_ids = torch.tensor(input_ids, dtype=torch.long)
 
         # Step 4：labels 与 input_ids 完全相同，但 PAD 位置置 -100，
@@ -112,7 +115,7 @@ class PretrainDataset(Dataset):
         labels = input_ids.clone()
         labels[input_ids == self.tokenizer.pad_token_id] = -100
 
-        # ！修正：返回 attention_mask，使 attention 层能屏蔽 padding token
+        # 返回 attention_mask，使 attention 层能屏蔽 padding token
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
         return input_ids, labels, attention_mask
 
