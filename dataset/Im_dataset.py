@@ -97,6 +97,7 @@ class PretrainDataset(Dataset):
             # 暂时不用加特殊的开头/结尾符号
             add_special_tokens=False,
             max_length=self.max_length - 2,  # 预留 BOS + EOS 的位置
+            # 如果遇到特别长、翻译成 Token 后数量超过了 max_length 的文本，请直接把超出的尾巴一刀切掉
             truncation=True,
         ).input_ids
 
@@ -115,7 +116,7 @@ class PretrainDataset(Dataset):
         labels = input_ids.clone()
         labels[input_ids == self.tokenizer.pad_token_id] = -100
 
-        # 返回 attention_mask，使 attention 层能屏蔽 padding token
+        # 返回 attention_mask，使 attention 层能屏蔽 padding token，最后为64位整数类型
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
         return input_ids, labels, attention_mask
 
