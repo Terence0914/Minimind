@@ -32,6 +32,7 @@ from train.trainer_utils import (  # 训练工具函数
 warnings.filterwarnings("ignore")
 
 
+
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     start_time = time.time()  # 记录开始时间
 
@@ -39,17 +40,19 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     for step, (input_ids, labels, attention_mask) in enumerate(
         loader, start=start_step + 1
     ):
+        #转移到GPU进行训练
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
         attention_mask = attention_mask.to(
             args.device
-        )  # 接收并转移 attention_mask
+        ) 
 
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
 
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
+        # 开启自动混合精度
         with autocast_ctx:
             # 前向传播
             res = model(
@@ -64,10 +67,12 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         scaler.scale(loss).backward()
 
+        # 判断是否达到了累积步数
         if step % args.accumulation_steps == 0:
             # scaler.unscale_(): 还原梯度的真实值
             scaler.unscale_(optimizer)
 
+            # 梯度裁剪
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
             # 📚 优化器更新知识点
@@ -77,6 +82,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             scaler.update()
 
             optimizer.zero_grad(set_to_none=True)
+
+
+
+
 
         if step % args.log_interval == 0 or step == iters:
             spend_time = time.time() - start_time
