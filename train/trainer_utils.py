@@ -22,7 +22,7 @@ def Logger(content):
 def get_lr(current_step, total_steps, lr):
     return (
         lr * (0.1 + 0.45 * (1 + math.cos(math.pi * current_step / total_steps)))
-    )  # ！修正：原公式 step=0 时 lr=1.1*lr 超出设定值，现修正为 step=0→lr, step=end→0.1*lr
+    )  # 原公式 step=0 时 lr=1.1*lr 超出设定值，现修正为 step=0→lr, step=end→0.1*lr
 
 
 # 初始化分布式

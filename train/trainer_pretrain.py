@@ -43,7 +43,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         labels = labels.to(args.device)
         attention_mask = attention_mask.to(
             args.device
-        )  # ！修正：接收并转移 attention_mask
+        )  # 接收并转移 attention_mask
 
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
 
@@ -54,11 +54,11 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             # 前向传播
             res = model(
                 input_ids, labels=labels, attention_mask=attention_mask
-            )  # ！修正：直接传入labels和attention_mask，由模型内部计算loss
+            )  # 直接传入labels和attention_mask，由模型内部计算loss
 
             loss = (
                 res.loss + res.aux_loss
-            )  # ！修正：原手动计算loss_fct+loss_mask，现用模型内置的loss
+            )  # 原手动计算loss_fct+loss_mask，现用模型内置的loss
 
             loss = loss / args.accumulation_steps
 
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     # ========== 基础训练参数 ==========
     parser.add_argument(
         "--save_dir", type=str, default="../out", help="模型保存目录"
-    )  # ！修正：原"out"缺少../前缀
+    )  # 原"out"缺少../前缀
     parser.add_argument(
         "--save_weight", default="pretrain", type=str, help="保存权重的前缀名"
     )
