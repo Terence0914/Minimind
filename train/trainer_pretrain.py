@@ -46,7 +46,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         attention_mask = attention_mask.to(
             args.device
         ) 
-
+        # 更新学习率
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
 
         for param_group in optimizer.param_groups:
@@ -63,11 +63,34 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
                 res.loss + res.aux_loss
             )  # 原手动计算loss_fct+loss_mask，现用模型内置的loss
 
+            # 不除会放大 N 倍
             loss = loss / args.accumulation_steps
 
+        # ==============================================================================
+        # 梯度累积 (Gradient Accumulation) 核心逻辑
+        # 目的：用时间换空间，在有限显存（小物理 Batch Size）下模拟大 Global Batch Size。
+        # ==============================================================================
+        # 
+        # 1. 设定累积步数 (accumulation_steps)：
+        #    假设单卡最多只能塞下物理 Batch Size = 16，但模型收敛需要 Global Batch Size = 128，
+        #    则设定 accumulation_steps = 8 (16 * 8 = 128)。
+        #
+        # 2. 只累加不更新（前 N-1 步）：
+        #    每次执行 scaler.scale(loss).backward() 时，PyTorch 会自动将梯度（偏导数）
+        #    累加到参数的 .grad 属性中，而不是覆盖。
+        #    此时不调用 optimizer.step()，保持参数不变。
+        #
+        # 3. 合并更新与清空（第 N 步）：
+        #    当达到累积步数 (step % accumulation_steps == 0) 时，内存中累加的梯度
+        #    已经等效于一次性塞入 128 条数据算出的真实梯度。
+        #    此时执行参数更新 (optimizer.step())，随后必须立即清空梯度 (optimizer.zero_grad())，
+        #    为下一轮累积腾出空间并重置状态。
+        # ==============================================================================
+
+        # 反向传播计算当前小批次的梯度，PyTorch 会自动在内存中累加这些梯度
         scaler.scale(loss).backward()
 
-        # 判断是否达到了累积步数
+        # 判断是否达到设定的累积步数
         if step % args.accumulation_steps == 0:
             # scaler.unscale_(): 还原梯度的真实值
             scaler.unscale_(optimizer)
@@ -75,14 +98,15 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             # 梯度裁剪
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
+            # 此时累加的梯度已等效于一个大的 Global Batch，执行真正的权重更新
             # 📚 优化器更新知识点
             # scaler.step(): 执行参数更新
             # scaler.update(): 更新scaler的缩放因子
             scaler.step(optimizer)
             scaler.update()
 
+            # 更新完毕后，务必清空累加的梯度，准备开启下一轮的梯度积攒
             optimizer.zero_grad(set_to_none=True)
-
 
 
 
