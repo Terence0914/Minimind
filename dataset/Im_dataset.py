@@ -137,6 +137,8 @@ class SFTDataset(Dataset):
     def __len__(self):
         return len(self.samples)
     
+    # 把“字典格式的对话”，转换成“模型专属格式的长字符串”。
+    # eg: {role: user, content: 你好} -> <|im_start|>user\n你好<|im_end|>
     def create_chat_prompt(self, conversations):
         # 复制原始conversations, 防止修改原始数据
         messages = conversations.copy()
