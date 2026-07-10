@@ -120,3 +120,88 @@ class PretrainDataset(Dataset):
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
         return input_ids, labels, attention_mask
 
+#SFT 
+class SFTDataset(Dataset):
+    def __init__ (self, jsonl_path, tokenizer, max_length = 1024):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.samples = load_dataset("json", data_files = jsonl_path, split = "train")
+        self.bos_id = tokenizer(
+            f"{tokenizer.bos_token}assistant\n ", add_special_tokens = False
+        ).input_ids
+        self.eos_id = tokenizer(
+            f"{tokenizer.eos_token}\n", add_special_tokens = False
+        ).input_ids
+
+    def __len__(self):
+        return len(self.samples)
+    
+    def create_chat_prompt(self, conversations):
+        # 复制原始conversations, 防止修改原始数据
+        messages = conversations.copy()
+        tools = (
+            conversations[0]["functions"]
+            if(
+                # conversations 不为空
+                conversations
+                # 对话的第一句话[0]的角色[role]是系统提示词[system]
+                and conversations[0]["role"] == 'system'
+                # 检查里面包含了function 字样，function calling 场景
+                and conversations[0].get("functions")
+            )
+            else None
+        )
+        # add_generation_prompt=False：不在末尾追加"请模型续写"的 prompt
+        return self.tokenizer.apply_chat_template(
+            messages, tokenize = False, add_generation_prompt = False, tools = tools
+        )
+    
+    def generate_labels(self, input_ids):
+        # 将全部的label都设置为 -100
+        labels = [-100] * len(input_ids)
+        i = 0
+        # 逐位扫描 input_ids，检测是否匹配 bos_id（assistant 回复起始）, 没找到就else: i += 1
+        while i < len(input_ids):
+            if input_ids[i : i + len(self.bos_id)] == self.bos_id: # list[start : stop]
+                # 找到bos_id就记做start
+                start = i + len(self.bos_id)
+                end = start
+                #  匹配到 bos_id 后，向后扫描直到找到 eos_id（回复结束）
+                while end < len(input_ids):
+                    if input_ids[end : end + len(self.eos_id)] == self.eos_id:
+                        break
+                    end += 1
+                # 将 [start, end+len(eos_id)) 区间内的 label 设为对应的 input_ids 值，min防止数组越界
+                # 即这段 assistant 回复参与 loss 计算
+                for j in range(start, min(end + len(self.eos_id), self.max_length)):
+                    labels[j] = input_ids[j]
+                # 跳过已处理区间，继续扫描下一段 assistant 回复（支持多轮对话）
+                i = end + len(self.eos_id) if end < len(input_ids) else len(input_ids)
+            else:
+                i += 1
+        return labels
+    
+    def __getitem__(self, index):
+        sample = self.samples[index]
+        # 随机决定是否插入 system prompt（数据增强）
+        conversations = pre_processing_chat(sample['conversations'])
+        # 用 chat template 渲染完整对话字符串
+        prompt = self.create_chat_prompt(conversations)
+        # 清理可能出现的空 <think> 块
+        prompt = post_processing_chat(prompt)
+        # tokenize 并截断到 max_length [:self.max_length]就是做截断
+        input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
+        # 不足则右侧 PAD 补齐
+        input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
+        # 生成稀疏标签，只有 assistant 回复部分有有效 label
+        labels = self.generate_labels(input_ids)
+        # 生成一个注意力掩码，是真实文字的位置标记为1，padding填充部分为0
+        attention_mask = (
+            torch.tensor(input_ids, dtype = torch.long) != self.tokenizer.pad_token_id).long()
+        return (
+            torch.tensor(input_ids, dtype= torch.long),
+            torch.tensor(labels, dtype = torch.long),
+            attention_mask
+        )
+        
