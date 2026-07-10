@@ -119,3 +119,4 @@ class PretrainDataset(Dataset):
         # 返回 attention_mask，使 attention 层能屏蔽 padding token，最后为64位整数类型
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
         return input_ids, labels, attention_mask
+
