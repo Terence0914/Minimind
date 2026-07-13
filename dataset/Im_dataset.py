@@ -294,6 +294,7 @@ class DPODataset(Dataset):
         }
     
     def generate_loss_mask(self, input_ids):
+        # 上来先造一个跟输入序列 input_ids 一模一样长的列表，里面全塞满 0
         loss_mask = [0] * len(input_ids)
         i = 0
         while i < len(input_ids):
@@ -304,9 +305,12 @@ class DPODataset(Dataset):
                     if input_ids[end : end + len(self.eos_id)] == self.eos_id:
                         break
                     end += 1
+                # min(..., self.max_length) 防止越界报错
                 for j in range(start, min(end + len(self.eos_id), self.max_length)):
+                    # 把这个区间里的 0 全部翻转成 1
                     loss_mask[j] = 1
 
+                # 既然已经处理完这一段 Assistant 的回复了，主指针 i 就可以直接“瞬移”到这句话的结尾, 继续扫码下一段
                 i = end + len(self.eos_id) if end < len(input_ids) else len(input_ids)
             else:
                 i += 1
