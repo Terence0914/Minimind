@@ -39,7 +39,7 @@ def logits_to_log_probs(logits, labels):
         log_probs, dim=2, index=labels.unsqueeze(2)
     ).squeeze(
         -1
-    )  # ！修正：原.unsqueeze(-1)导致维度错误[B,S,1,1]，应用.squeeze(-1)降维到[B,S]
+    )  # unsqueeze(-1)导致维度错误[B,S,1,1]，应用.squeeze(-1)降维到[B,S]
     return log_probs_per_token
 
 
@@ -48,7 +48,7 @@ def logits_to_log_probs(logits, labels):
 def dpo_loss(ref_log_probs, policy_log_probs, mask, beta):
     seq_lengths = mask.sum(dim=1, keepdim=True).clamp_min(
         1e-8
-    )  # ！修正：原clamp_min断裂为独立一行，导致NameError
+    )  
     # 计算ref和policy的序列log概率均值
     ref_log_probs = (ref_log_probs * mask).sum(dim=1) / seq_lengths.squeeze()
     policy_log_probs = (policy_log_probs * mask).sum(dim=1) / seq_lengths.squeeze()
@@ -82,17 +82,17 @@ def train_epoch(
         mask_rejected = batch["mask_rejected"].to(args.device)
         attention_mask_chosen = batch["attention_mask_chosen"].to(
             args.device
-        )  # ！修正：加入attention_mask
+        )  # 加入attention_mask
         attention_mask_rejected = batch["attention_mask_rejected"].to(
             args.device
-        )  # ！修正：加入attention_mask
+        )  # 加入attention_mask
 
         x = torch.cat([x_chosen, x_rejected], dim=0)
         y = torch.cat([y_chosen, y_rejected], dim=0)
         mask = torch.cat([mask_chosen, mask_rejected], dim=0)
         attention_mask = torch.cat(
             [attention_mask_chosen, attention_mask_rejected], dim=0
-        )  # ！修正：合并attention_mask
+        )  # 合并attention_mask
 
         # 📚 学习率调度
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
@@ -113,7 +113,7 @@ def train_epoch(
             # 策略模型是需要优化的主要模型
             outputs = model(
                 x, attention_mask=attention_mask
-            )  # ！修正：加入attention_mask
+            )  # 加入attention_mask
             logits = outputs.logits
             policy_log_probs = logits_to_log_probs(logits, y)
 
@@ -121,7 +121,7 @@ def train_epoch(
             dpo_loss_val = dpo_loss(ref_log_probs, policy_log_probs, mask, beta=beta)
             loss = (
                 dpo_loss_val + outputs.aux_loss
-            )  # ！修正：原缺少aux_loss，MoE辅助损失被丢弃
+            )  
             loss = loss / args.accumulation_steps
 
         # 📚 反向传播
