@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
 from model.model import MokioMindConfig, MokioMindForCausalLM
-#from model.model_lora import apply_lora, load_lora  # ！修正：原缺少LoRA加载支持
+from model.model_lora import apply_lora, load_lora  # 原缺少LoRA加载支持
 from train.trainer_utils import setup_seed
 
 warnings.filterwarnings("ignore")
@@ -20,7 +20,7 @@ def init_model(args):
                 num_hidden_layers=args.num_hidden_layers,
                 use_moe=bool(
                     args.use_moe
-                ),  # ！修正：原缺少use_moe参数，MoE模型无法正确加载
+                ),  # 原缺少use_moe参数，MoE模型无法正确加载
                 inference_rope_scaling=args.inference_rope_scaling,
             )
         )
@@ -28,15 +28,15 @@ def init_model(args):
         ckp = f"./{args.save_dir}/{args.weight}_{args.hidden_size}{moe_suffix}.pth"
         model.load_state_dict(
             torch.load(ckp, map_location=args.device), strict=True
-        )  # ！修正：原strict=False会静默忽略丢失/多余的权重键
+        )  # 原strict=False会静默忽略丢失/多余的权重键
 
-        # ！修正：原缺少LoRA加载逻辑
-        #if args.lora_weight != "None":
-            #apply_lora(model)
-            #load_lora(
-                #model,
-                #f"./{args.save_dir}/lora/{args.lora_weight}_{args.hidden_size}.pth",
-            #)
+        # 原缺少LoRA加载逻辑
+        if args.lora_weight != "None":
+            apply_lora(model)
+            load_lora(
+                model,
+                f"./{args.save_dir}/lora/{args.lora_weight}_{args.hidden_size}.pth",
+            )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             args.load_from, trust_remote_code=True
@@ -50,7 +50,7 @@ def init_model(args):
 def main():
     parser = argparse.ArgumentParser(
         description="MokioMind模型推理与对话"
-    )  # ！修正：原残留MiniMind命名
+    )  # 原残留MiniMind命名
     parser.add_argument(
         "--load_from",
         default="model",
