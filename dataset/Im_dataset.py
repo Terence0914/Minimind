@@ -315,3 +315,51 @@ class DPODataset(Dataset):
             else:
                 i += 1
         return loss_mask
+
+# RLAIFDataset —— 基于 AI 反馈的强化学习数据集（用于 PPO / GRPO）
+class RLAIFDataset(Dataset):
+    def __init__(self, jsonl_path, tokenizer, max_length = 1024):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.samples = load_dataset("json", data_files = jsonl_path, split = "train")
+        self.bos_id = tokenizer(
+            f"{tokenizer.bos_token}assistant", add_special_tokens=False
+        ).input_ids
+        self.eos_id = tokenizer(
+            f"{tokenizer.eos_token}", add_special_tokens=False
+        ).input_ids
+
+    def __len__(self):
+        return len(self.samples)
+    
+    def create_chat_prompt(self, conversations):
+        messages = []
+        answer = ""
+        # 如果是偶数就是user发言，奇数的话就是assistant发言
+        for i, turn in enumerate(conversations):
+            role = "user" if i % 2 == 0 else "assistant"
+            # 将当前轮次的内容提取出来，带上身份标签，打包成标准字典格式存入列表
+            messages.append({"role" : role, "content" : turn["content"]})
+            # 不断覆盖更新 answer。当循环结束时，这里保留的就是最后一条（即最新的）回复
+            answer = turn['content']
+        # 添加标签
+        # messages[:-1] 表示取 messages 列表中除了最后一条之外的所有消息，因为最后一条已经被作为 answer 剥离了
+        # add_generation_prompt = True, 在字符串的末尾自动加上让助手开始发言的引导符
+        # 这样模型接到这段 prompt 后就知道接下来该它生成回复了
+        prompt = self.tokenizer.apply_chat_template(
+            messages[:-1],
+            tokenize = False,
+            add_generation_prompt = True,
+        )
+        # 清理多余的空格/特殊字符
+        prompt = post_processing_chat(prompt)
+        return prompt, answer
+    
+    def __getitem__(self, index):
+        sample = self.samples[index]
+        prompt, answer = self.create_chat_prompt(sample["conversations"])
+        return {"prompt": prompt, "answer" : answer}
+    
+if __name__ == "__main__":
+    pass
