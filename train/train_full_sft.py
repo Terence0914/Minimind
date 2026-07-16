@@ -13,7 +13,7 @@ from contextlib import nullcontext  # 上下文管理器
 from torch import optim, nn  # 优化器和神经网络模块
 from torch.nn.parallel import DistributedDataParallel  # 分布式数据并行
 from torch.utils.data import DataLoader, DistributedSampler  # 数据加载器
-from model.model import MokioMindConfig  # 模型配置
+from model.model import TerenceMindConfig  # 模型配置
 from dataset.Im_dataset import SFTDataset  # 监督微调数据集
 from train.trainer_utils import (
     get_lr,
@@ -168,7 +168,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MokioMind Full SFT")
+    parser = argparse.ArgumentParser(description="TerenceMind Full SFT")
 
     # ========== 基础训练参数 ==========
     parser.add_argument("--save_dir", type=str, default="../out", help="模型保存目录")
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     # ========== 实验跟踪参数 ==========
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument(
-        "--wandb_project", type=str, default="MokioMind-Full-SFT", help="wandb项目名"
+        "--wandb_project", type=str, default="TerenceMind-Full-SFT", help="wandb项目名"
     )
     parser.add_argument(
         "--use_compile",
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     - Pretrain脚本中from_weight='none'表示从头开始
     """
     os.makedirs(args.save_dir, exist_ok=True)  # 确保保存目录存在
-    lm_config = MokioMindConfig(
+    lm_config = TerenceMindConfig(
         hidden_size=args.hidden_size,
         num_hidden_layers=args.num_hidden_layers,
         use_moe=bool(args.use_moe),
@@ -308,7 +308,7 @@ if __name__ == "__main__":
 
         wandb_id = ckp_data.get("wandb_id") if ckp_data else None
         resume = "must" if wandb_id else None  # 必须恢复到同一实验
-        wandb_run_name = f"MokioMind-Full-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
+        wandb_run_name = f"TerenceMind-Full-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
         wandb.init(
             project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume
         )

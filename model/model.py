@@ -486,7 +486,7 @@ class MoEFeedForward(nn.Module):  # ！修正：原MoEFeedForaward拼写错误
         return expert_cache
 
 
-class MokioMindBlock(nn.Module):
+class TerenceMindBlock(nn.Module):
     def __init__(self, layer_id: int, config: TerenceMindConfig):
         super().__init__()
         self.num_attention_heads = config.num_attention_heads
@@ -531,7 +531,7 @@ class MokioMindBlock(nn.Module):
         return hidden_states, present_key_value
 
 
-class MokioMindModel(nn.Module):
+class TerenceMindModel(nn.Module):
     def __init__(self, config: TerenceMindConfig):
         super().__init__()
         self.config = config
@@ -542,7 +542,7 @@ class MokioMindModel(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         self.dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
-            [MokioMindBlock(l, config) for l in range(self.num_hidden_layers)]
+            [TerenceMindBlock(l, config) for l in range(self.num_hidden_layers)]
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -614,12 +614,12 @@ class MokioMindModel(nn.Module):
         return hidden_states, presents, aux_loss
 
 
-class MokioMindForCausalLM(PreTrainedModel, GenerationMixin):
+class TerenceMindForCausalLM(PreTrainedModel, GenerationMixin):
     config_class = TerenceMindConfig
 
     def __init__(self, config: TerenceMindConfig):
         super().__init__(config)
-        self.model = MokioMindModel(config)
+        self.model = TerenceMindModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.model.embed_tokens.weight = self.lm_head.weight
 

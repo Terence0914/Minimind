@@ -15,7 +15,7 @@ from transformers import AutoTokenizer, AutoModel
 __package__ = "trainer"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model.model import MokioMindConfig
+from model.model import TerenceMindConfig
 from dataset.Im_dataset import RLAIFDataset
 from train.trainer_utils import (
     Logger,
@@ -276,7 +276,7 @@ def grpo_train_epoch(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="MokioMind GRPO (Group Relative Policy Optimization)"
+        description="TerenceMind GRPO (Group Relative Policy Optimization)"
     )
 
     parser.add_argument("--save_dir", type=str, default="../out", help="模型保存目录")
@@ -349,7 +349,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument(
-        "--wandb_project", type=str, default="MokioMind-GRPO", help="wandb项目名"
+        "--wandb_project", type=str, default="TerenceMind-GRPO", help="wandb项目名"
     )
     args = parser.parse_args()
 
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     setup_seed(42 + (dist.get_rank() if dist.is_initialized() else 0))
 
     os.makedirs(args.save_dir, exist_ok=True)
-    lm_config = MokioMindConfig(
+    lm_config = TerenceMindConfig(
         hidden_size=args.hidden_size,
         num_hidden_layers=args.num_hidden_layers,
         max_position_embeddings=args.max_seq_len + args.max_gen_len,
@@ -377,7 +377,7 @@ if __name__ == "__main__":
 
         wandb_id = ckp_data.get("wandb_id") if ckp_data else None
         resume = "must" if wandb_id else None
-        wandb_run_name = f"MokioMind-GRPO-Epoch-{args.epochs}-BS-{args.batch_size}-LR-{args.learning_rate}"
+        wandb_run_name = f"TerenceMind-GRPO-Epoch-{args.epochs}-BS-{args.batch_size}-LR-{args.learning_rate}"
         wandb.init(
             project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume
         )

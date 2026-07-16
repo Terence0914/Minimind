@@ -4,7 +4,7 @@ import warnings
 import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
-from model.model import MokioMindConfig, MokioMindForCausalLM
+from model.model import TerenceMindConfig, TerenceMindForCausalLM
 from model.model_lora import apply_lora, load_lora  # 原缺少LoRA加载支持
 from train.trainer_utils import setup_seed
 
@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 def init_model(args):
     tokenizer = AutoTokenizer.from_pretrained(args.load_from)
     if "model" in args.load_from:
-        model = MokioMindForCausalLM(
-            MokioMindConfig(
+        model = TerenceMindForCausalLM(
+            TerenceMindConfig(
                 hidden_size=args.hidden_size,
                 num_hidden_layers=args.num_hidden_layers,
                 use_moe=bool(
@@ -42,14 +42,14 @@ def init_model(args):
             args.load_from, trust_remote_code=True
         )
     print(
-        f"MokioMind模型参数: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M(illion)"  # ！修正：原残留MiniMind命名
+        f"TerenceMind模型参数: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M(illion)"  # ！修正：原残留MiniMind命名
     )
     return model.eval().to(args.device), tokenizer
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MokioMind模型推理与对话"
+        description="TerenceMind模型推理与对话"
     )  # 原残留MiniMind命名
     parser.add_argument(
         "--load_from",

@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader, DistributedSampler  # 数据加载
 from torch.nn.utils import clip_grad_norm_  # 梯度裁剪
 from torch.optim.lr_scheduler import CosineAnnealingLR  # 余弦退火学习率调度
 from transformers import AutoModel  # HuggingFace模型加载
-from model.model import MokioMindConfig, MokioMindForCausalLM  # MiniMind模型
+from model.model import TerenceMindConfig, TerenceMindForCausalLM  # MiniMind模型
 from dataset.Im_dataset import RLAIFDataset  # RL数据集
 from train.trainer_utils import (  # 训练工具函数
     Logger,
@@ -35,7 +35,7 @@ warnings.filterwarnings("ignore")
 # ==========Critic Model部分==========
 
 
-class CriticModel(MokioMindForCausalLM):
+class CriticModel(TerenceMindForCausalLM):
     def __init__(self, params):
         super().__init__(params)
         # 价值头，用于输出每个token位置的状态价值
@@ -376,7 +376,7 @@ if __name__ == "__main__":
 
     # 📚 命令行参数解析
     parser = argparse.ArgumentParser(
-        description="MokioMind PPO (Proximal Policy Optimization)"
+        description="TerenceMind PPO (Proximal Policy Optimization)"
     )
 
     # ========== 基础训练参数 ==========
@@ -478,7 +478,7 @@ if __name__ == "__main__":
     # ========== 实验跟踪 ==========
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument(
-        "--wandb_project", type=str, default="MokioMind-PPO", help="wandb项目名"
+        "--wandb_project", type=str, default="TerenceMind-PPO", help="wandb项目名"
     )
 
     args = parser.parse_args()
@@ -490,7 +490,7 @@ if __name__ == "__main__":
 
     # ========== 2. 配置目录、模型参数、检查ckp ==========
     os.makedirs(args.save_dir, exist_ok=True)
-    lm_config = MokioMindConfig(
+    lm_config = TerenceMindConfig(
         hidden_size=args.hidden_size,
         num_hidden_layers=args.num_hidden_layers,
         use_moe=bool(args.use_moe),
@@ -515,7 +515,7 @@ if __name__ == "__main__":
 
         wandb_id = ckp_data.get("wandb_id") if ckp_data else None
         resume = "must" if wandb_id else None
-        wandb_run_name = f"MokioMind-PPO-Epoch-{args.epochs}-BS-{args.batch_size}-LR-{args.learning_rate}"
+        wandb_run_name = f"TerenceMind-PPO-Epoch-{args.epochs}-BS-{args.batch_size}-LR-{args.learning_rate}"
         wandb.init(
             project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume
         )

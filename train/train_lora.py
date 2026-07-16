@@ -1,5 +1,5 @@
 """
-MokioMind LoRA (Low-Rank Adaptation) 微调脚本  # ！修正：原MiniMind改为MokioMind
+TerenceMind LoRA (Low-Rank Adaptation) 微调脚本  
 
 📚 LoRA 核心知识点：
 - 什么是LoRA：一种参数高效微调方法，只训练少量新增参数
@@ -37,8 +37,8 @@ from torch import optim  # 优化器
 from torch.nn.parallel import DistributedDataParallel  # 分布式数据并行
 from torch.utils.data import DataLoader, DistributedSampler  # 数据加载
 
-# MokioMind相关组件
-from model.model import MokioMindConfig  # 模型配置
+# TerenceMind相关组件
+from model.model import TerenceMindConfig  # 模型配置
 from dataset.Im_dataset import SFTDataset  # 监督微调数据集
 from model.model_lora import save_lora, apply_lora  # LoRA权重保存和应用
 from train.trainer_utils import (  # 训练工具函数
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     # 📚 命令行参数解析
     # argparse: Python标准库，用于解析命令行参数
     # 提供默认值和帮助信息，便于用户配置训练参数
-    parser = argparse.ArgumentParser(description="MokioMind LoRA Fine-tuning")
+    parser = argparse.ArgumentParser(description="TerenceMind LoRA Fine-tuning")
 
     # 📚 模型保存相关参数
     # save_dir: 指定LoRA权重和检查点的保存目录
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     # wandb_project: WandB项目的名称，用于组织实验
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument(
-        "--wandb_project", type=str, default="MokioMind-LoRA", help="wandb项目名"
+        "--wandb_project", type=str, default="TerenceMind-LoRA", help="wandb项目名"
     )
     args = parser.parse_args()
 
@@ -339,8 +339,8 @@ if __name__ == "__main__":
     os.makedirs(args.save_dir, exist_ok=True)
 
     # 📚 模型配置初始化
-    # MokioMindConfig: 定义模型的超参数，如隐藏维度、层数、是否使用MoE
-    lm_config = MokioMindConfig(
+    # TerenceMindConfig: 定义模型的超参数，如隐藏维度、层数、是否使用MoE
+    lm_config = TerenceMindConfig(
         hidden_size=args.hidden_size,
         num_hidden_layers=args.num_hidden_layers,
         use_moe=bool(args.use_moe),
@@ -387,7 +387,7 @@ if __name__ == "__main__":
 
         # 📚 实验名称生成
         # 包含关键参数，便于识别不同的实验配置
-        wandb_run_name = f"MokioMind-LoRA-{args.lora_name}-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LR-{args.learning_rate}"
+        wandb_run_name = f"TerenceMind-LoRA-{args.lora_name}-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LR-{args.learning_rate}"
         wandb.init(
             project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume
         )
