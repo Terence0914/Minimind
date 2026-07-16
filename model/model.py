@@ -1,8 +1,8 @@
 from transformers import PretrainedConfig
 
 
-class MokioMindConfig(PretrainedConfig):
-    model_type = "mokiomind"
+class TerenceMindConfig(PretrainedConfig):
+    model_type = "Terencemind"
 
     def __init__(
         self,
@@ -197,7 +197,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class Attention(nn.Module):
-    def __init__(self, args: MokioMindConfig):
+    def __init__(self, args: TerenceMindConfig):
         super().__init__()
 
         self.num_key_value_heads = (
@@ -298,7 +298,7 @@ class Attention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, config: MokioMindConfig):
+    def __init__(self, config: TerenceMindConfig):
         super().__init__()
         if config.intermediate_size is None:
             intermediate_size = int(config.hidden_size * 8 / 3)
@@ -322,7 +322,7 @@ class FeedForward(nn.Module):
 
 
 class MoEGate(nn.Module):
-    def __init__(self, config: MokioMindConfig):
+    def __init__(self, config: TerenceMindConfig):
         super().__init__()
         self.config = config
         self.top_k = config.num_experts_per_tok
@@ -391,7 +391,7 @@ class MoEGate(nn.Module):
 
 
 class MoEFeedForward(nn.Module):  # ！修正：原MoEFeedForaward拼写错误
-    def __init__(self, config: MokioMindConfig):
+    def __init__(self, config: TerenceMindConfig):
         super().__init__()
         self.config = config
         # 专家层
@@ -487,7 +487,7 @@ class MoEFeedForward(nn.Module):  # ！修正：原MoEFeedForaward拼写错误
 
 
 class MokioMindBlock(nn.Module):
-    def __init__(self, layer_id: int, config: MokioMindConfig):
+    def __init__(self, layer_id: int, config: TerenceMindConfig):
         super().__init__()
         self.num_attention_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
@@ -532,7 +532,7 @@ class MokioMindBlock(nn.Module):
 
 
 class MokioMindModel(nn.Module):
-    def __init__(self, config: MokioMindConfig):
+    def __init__(self, config: TerenceMindConfig):
         super().__init__()
         self.config = config
         self.vocab_size, self.num_hidden_layers = (
@@ -615,9 +615,9 @@ class MokioMindModel(nn.Module):
 
 
 class MokioMindForCausalLM(PreTrainedModel, GenerationMixin):
-    config_class = MokioMindConfig
+    config_class = TerenceMindConfig
 
-    def __init__(self, config: MokioMindConfig):
+    def __init__(self, config: TerenceMindConfig):
         super().__init__(config)
         self.model = MokioMindModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
