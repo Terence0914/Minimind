@@ -109,6 +109,7 @@ def precompute_freqs(
 ):
     
     #计算基础的旋转频率θ，原公式为 θ = 10000^(-2i/d), 其中2i 是维度的偶数索引 (0, 2, 4, 6)，
+    # ** 是幂运算 x^y
     # [:(dim // 2)]是切片， 因为RoPE 旋转位置编码必须在“偶数维度”上成对操作
     # 1/...是为了取倒数，也就是那个-号
     freqs, attn_factor = (1.0 / rope_base ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim) , 1.0)
