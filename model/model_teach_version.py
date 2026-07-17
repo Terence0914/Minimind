@@ -154,7 +154,7 @@ def precompute_freqs(
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1):
     def rotate_half(x):
-        #设我们有一个隐藏层向量 x，里面有 4 个数字：[A, B, C, D]。
+        # 设我们有一个隐藏层向量 x，里面有 4 个数字：[A, B, C, D]。
         # x.shape[-1] // 2：就是找到向量的中点（4的一半是 2）
         # x[..., x.shape[-1] // 2:]：拿走后半部分  [C, D]
         # x[..., : x.shape[-1] // 2]：拿走前半部分  [A, B]
@@ -168,6 +168,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids = None, unsqueeze_dim = 1)
     # 应用二维平面旋转公式：
     # x' = x * cos(θ) - y * sin(θ)
     # y' = x * sin(θ) + y * cos(θ)
+    # unsqueeze扩充一个维度
     q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)) * sin.unsqueeze(unsqueeze_dim)
     k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)) * sin.unsqueeze(unsqueeze_dim)
     return q_embed, k_embed
