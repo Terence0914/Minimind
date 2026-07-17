@@ -123,7 +123,8 @@ def precompute_freqs(
             rope_scaling.get("attention_factor", 1.0), #注意力温度补偿系数，用来在变长后调整softmax的分布
             )
         if end / orig_max > 1.0:
-            #反推lambda = orig_max / b 求i
+            # 反推lambda = orig_max / b 求i
+            # inv_dim 是一个“单位转换器”，它负责把论文里抽象的“波长”概念，翻译成 PyTorch 能够听懂的“数组索引（Index）
             inv_dim = lambda b : (dim * math.log(orig_max / (b * 2 * math.pi))) / (2 * math.log(rope_base))
 
             low, high = (
