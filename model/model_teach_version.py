@@ -252,7 +252,7 @@ class Attention(nn.Module):
     ):
         #读取批次大小，序列长度
         bsz,seq_len,_ = x.shape
-        #线性投影
+        #线性投影 - 做多头拆分
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         xq = xq.view(bsz, seq_len, self.n_local_heads, self.head_dim) #batch_size, seq_len, 8, 64
         xk = xk.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim) #batch_size, seq_len, 2, 64
@@ -268,7 +268,7 @@ class Attention(nn.Module):
             xv = torch.cat([past_key_value[1], xv], dim = 1) #past_key_value[1]：索引拿到的就是历史的 V，在这里是沿着序列长度维度拼接
         past_kv = (xk, xv) if use_cache else None
 
-        # 重组多头阵型
+        # 重组多头阵型 - 整理成transformer计算所需要的格式
         xq, xk, xv = (
             xq.transpose(1, 2), #转置后batch_size, num_heads, seq_len, head_dim
             repeat_kv(xk, self.n_rep).transpose(1, 2), #转置后batch_size, num_heads, seq_len, head_dim
