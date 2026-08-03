@@ -1,3 +1,5 @@
+[中文](README.md) | [English](README_EN.md)
+
 # Minimind 个人手撕
 
 原项目地址：https://github.com/jingyaogong/minimind
@@ -10,7 +12,7 @@
 * **numpy**
 * **datasets**: `pip install datasets`
 * **swanlab**: `pip install swanlab`
-* **transformer**: `pip install transformer`
+* **transformers**: `pip install transformers`
 
 **⏱️ 训练信息参考：**
 * **硬件**：RTX 4090 (24GB)
